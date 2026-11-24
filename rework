@@ -1,52 +1,832 @@
-window.moveContainerFromDB = async function(containerId) {
-    if (!currentSlotTarget) return;
+<script th:inline="none">
+/* ============================================================
+   СПРАВОЧНИКИ И СОСТОЯНИЯ
+============================================================ */
 
-    const target = currentSlotTarget;
+const API_BASE = "http://172.27.93.55:8888/api";
 
-    try {
-        const payload = {
-            block: target.block,
-            bay: target.bay,
-            tier: target.tier
+let STATES = {
+    inuse: { name: "Удовлетворительное", color: "var(--st-inuse)", hex: "#2f6b4f", pulse: false },
+    damaged: { name: "Брак", color: "var(--st-damaged)", hex: "#9c3b22", pulse: true }
+};
+
+let PROC = {
+    arrival: { name: "Поступление", color: "#3a8a63", hex: "#3a8a63" },
+    weighing: { name: "Взвешивание", color: "var(--pr-weigh)", hex: "#1f6b8a" },
+    storage: { name: "Хранение", color: "var(--pr-store)", hex: "#7a5a1e" },
+    shipment: { name: "Отгрузка", color: "var(--pr-ship)", hex: "#5a3a8a" }
+};
+
+let OWNERS = [];
+let PREFIXES = [];
+let ALL_TYPES = [];
+
+window.CONTAINER_TYPES = [];
+
+const DEMO_TYPES = [
+    "ИСО-1CX-SG",
+    "ИСО-1CX обычный",
+    "СК-3-30Д",
+    "ИСО-1CC-SG",
+    "ИСО-1CX",
+    "ИСО-1CC",
+    "ИСО-1CC без КБК"
+];
+
+const TYPE_BLACKLIST = new Set([
+    "что-то",
+    "что-от",
+    "тест",
+    "test",
+    "...",
+    "-"
+]);
+
+function isJunkType(cap) {
+    const c = String(cap || "").trim().toLowerCase();
+    return !c || TYPE_BLACKLIST.has(c);
+}
+
+function stateOf(code) {
+    return STATES[code] || STATES.inuse || {
+        name: code || "Неизвестно",
+        color: "#888",
+        hex: "#888",
+        pulse: false
+    };
+}
+
+function procOf(code) {
+    return PROC[code] || null;
+}
+
+const procName = k => PROC[k] ? PROC[k].name : "";
+
+const DOC_TYPES = {
+    weighing: "Акт взвешивания",
+    reweigh: "Акт перевески",
+    msm: "Общий список МСМ",
+    accompanying: "Сопроводительные документы",
+    quality: "Документы о качестве",
+    shipping: "Отгрузочные документы"
+};
+
+const DOC_CARRIERS = {
+    paper: "Бумажный носитель",
+    share: "Сетевая папка",
+    email: "Электронная почта",
+    xml: "XML"
+};
+
+const DOC_DEF_CARRIER = {
+    weighing: "email",
+    reweigh: "email",
+    msm: "share",
+    accompanying: "paper",
+    quality: "paper",
+    shipping: "paper"
+};
+
+const CARRIER_ICON = {
+    paper: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6",
+    share: "M4 22V4a2 2 0 0 1 2-2h8l6 6v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z",
+    email: "M4 4h16v16H4z M4 6l8 6 8-6",
+    xml: "M8 7l-5 5 5 5 M16 7l5 5-5 5"
+};
+
+const FIELD_LABELS = {
+    prefix: "Префикс",
+    number: "Номер",
+    typeLegacy: "Тип контейнера",
+    iso: "ISO code",
+    pw: "Вес по трафарету",
+    tareFact: "Тара факт.",
+    gross: "Брутто",
+    grossRepeat: "Повторное взвешивание",
+    state: "Состояние",
+    procState: "Статус операции",
+    owner: "Ответственный",
+    kgmk: "Собственность КГМК",
+    retired: "Выведен из оборота",
+    note: "Примечания"
+};
+
+const CURRENT_USER = "Сидорова Е.Н.";
+const HARD_MAX = 7;
+
+/* ============================================================
+   UI STATE
+============================================================ */
+
+let DATA = [];
+let LAYOUT = new Map();
+let dataSource = "demo";
+
+let view = "yard";
+let selectedId = null;
+let editing = null;
+let editingOld = null;
+let drawerTab = "data";
+
+const selectedIds = new Set();
+
+let role = "editor";
+const canWrite = () => role !== "reader";
+const canAdmin = () => role === "admin";
+
+let planMode = false;
+let factData = null;
+let PLAN_DATA = new Map();
+
+const factUndo = [];
+const factRedo = [];
+const planUndo = [];
+const planRedo = [];
+
+let prevUndoLen = 0;
+
+const filters = {
+    state: new Set(),
+    proc: new Set(),
+    type: new Set(),
+    own: new Set()
+};
+
+let query = "";
+let sort = "num";
+
+const pagination = {
+    page: 0,
+    size: 50000,
+    chunkSize: 1000,
+    totalElements: 0,
+    isLoading: false,
+    hasMore: false
+};
+
+const $ = s => document.querySelector(s);
+const yard = $("#yard");
+const yardWrap = $(".yard-wrap");
+
+const OVER = 5;
+const ROWH = { yard: 192, list: 71, g: 69 };
+const MINCOL = 222;
+const TSTEP = 26;
+const STACK_CAP = 60;
+
+const fmt = n => Number(n || 0).toLocaleString("ru-RU");
+const pad2 = n => String(n ?? "").padStart(2, "0");
+const initials = n => String(n || "—").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+const fmtDate = ts => ts ? new Date(ts).toLocaleString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+}) : "—";
+
+const actUndo = () => planMode ? planUndo : factUndo;
+const actRedo = () => planMode ? planRedo : factRedo;
+const anyFilterActive = () => !!(query || filters.state.size || filters.proc.size || filters.type.size || filters.own.size);
+
+/* ============================================================
+   ISO CHECK DIGIT
+============================================================ */
+
+const ISO_VAL = {};
+
+(function () {
+    let v = 10;
+    for (let c = 65; c <= 90; c++) {
+        if (v % 11 === 0) v++;
+        ISO_VAL[String.fromCharCode(c)] = v++;
+    }
+})();
+
+function checkDigit(prefix, serial6) {
+    const s = (prefix + serial6).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+    let sum = 0;
+
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        const val = (ch >= "0" && ch <= "9") ? +ch : (ISO_VAL[ch] || 0);
+        sum += val * Math.pow(2, i);
+    }
+
+    let r = sum % 11;
+    if (r === 10) r = 0;
+    return r;
+}
+
+function computedCheck(it) {
+    return checkDigit(it.prefix, String(it.number || "").slice(0, 6));
+}
+
+/* ============================================================
+   DEMO FALLBACK
+============================================================ */
+
+function rnd(a) {
+    return a[Math.floor(Math.random() * a.length)];
+}
+
+function rndInt(a, b) {
+    return a + Math.floor(Math.random() * (b - a + 1));
+}
+
+const STATE_POOL = [];
+Object.entries({ inuse: 80, damaged: 20 }).forEach(([k, n]) => {
+    for (let i = 0; i < n; i++) STATE_POOL.push(k);
+});
+
+const PROC_POOL = ["", "arrival", "weighing", "storage", "shipment"];
+const H_POOL = [1, 2, 2, 3, 3, 3, 4, 4, 5];
+
+function buildPlan(n) {
+    const NAMES = "ABCDEFGHJKLMNPRT";
+    const layout = new Map();
+    const slots = [];
+    let bi = 0;
+
+    while (slots.length < n && bi < NAMES.length + 8) {
+        const name = bi < NAMES.length ? NAMES[bi] : ("B" + (bi - NAMES.length + 1));
+        const baysCount = 24 + (bi % 5) * 2;
+        const bays = [];
+
+        for (let b = 1; b <= baysCount; b++) {
+            bays.push(b);
+            if (b === baysCount) continue;
+
+            const h = rnd(H_POOL);
+            for (let t = 1; t <= h; t++) {
+                slots.push({ block: name, bay: b, tier: t });
+            }
+        }
+
+        layout.set(name, { bays });
+        bi++;
+    }
+
+    return { slots: slots.slice(0, n), layout };
+}
+
+function genData(N) {
+    const { slots, layout } = buildPlan(N);
+    LAYOUT = layout;
+
+    const out = [];
+    let serial = 6180000;
+    const DAY = 86400000;
+    const now = Date.now();
+
+    const localPrefixes = PREFIXES.length ? PREFIXES : ["NMKU", "TRLU", "MSKU"];
+    const localOwners = OWNERS.length ? OWNERS.map(o => o.fullName) : ["Иванов А.С.", "Петров В.И."];
+
+    for (let i = 0; i < N; i++) {
+        const prefix = rnd(localPrefixes);
+        const typeLegacy = rnd(DEMO_TYPES);
+        const pw = typeAttrs(typeLegacy).pw;
+        const state = rnd(STATE_POOL);
+
+        serial += 1 + Math.floor(Math.random() * 7);
+        const s6 = String(serial).slice(-6);
+        const cd = checkDigit(prefix, s6);
+        const valid = Math.random() > 0.08;
+        const last = valid ? cd : ((cd + 1 + Math.floor(Math.random() * 8)) % 10);
+        const number = s6 + last;
+
+        const proc = rnd(PROC_POOL);
+        const createdAt = now - rndInt(30, 420) * DAY;
+
+        let tareFact = null;
+        let gross = null;
+        let grossRepeat = null;
+
+        if (proc === "weighing") {
+            if (Math.random() < 0.5) tareFact = pw + rndInt(-30, 30);
+        } else if (proc !== "") {
+            tareFact = pw + rndInt(-30, 30);
+        }
+
+        if (proc === "storage" || proc === "shipment") {
+            if (tareFact == null) tareFact = pw + rndInt(-30, 30);
+            gross = tareFact + rndInt(5000, 21000);
+            if (Math.random() < 0.5) grossRepeat = gross + rndInt(-45, 45);
+        }
+
+        out.push({
+            id: i + 1,
+            prefix,
+            number,
+            iso: "",
+            typeLegacy,
+            pw,
+            tareFact,
+            gross,
+            grossRepeat,
+            state,
+            procState: proc,
+            owner: rnd(localOwners),
+            kgmk: Math.random() > 0.4,
+            retired: false,
+            block: slots[i]?.block || null,
+            bay: slots[i]?.bay || null,
+            tier: slots[i]?.tier || null,
+            docs: [],
+            moveLog: [],
+            changeLog: [],
+            createdAt,
+            updatedAt: createdAt,
+            note: ""
+        });
+    }
+
+    return out;
+}
+
+/* ============================================================
+   МАППИНГ DTO -> UI
+============================================================ */
+
+function toMillis(v) {
+    if (v == null || v === "") return null;
+    if (typeof v === "number") return v;
+    const t = new Date(v).getTime();
+    return Number.isFinite(t) ? t : null;
+}
+
+function mapMoveDto(m) {
+    if (!m) return null;
+
+    if (m.from && m.to) {
+        return {
+            at: toMillis(m.at) || Date.now(),
+            from: m.from,
+            to: m.to
         };
+    }
 
-        const res = await fetch(`${API_BASE}/containers/${containerId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
+    return {
+        at: toMillis(m.at || m.movedAt) || Date.now(),
+        from: {
+            block: m.fromBlock,
+            bay: m.fromBay,
+            tier: m.fromTier
+        },
+        to: {
+            block: m.toBlock,
+            bay: m.toBay,
+            tier: m.toTier
+        }
+    };
+}
+
+function mapDocDto(d) {
+    return {
+        id: d.id,
+        type: d.type,
+        num: d.num,
+        date: toMillis(d.date),
+        carrier: d.carrier
+    };
+}
+
+function mapChangeDto(l) {
+    return {
+        id: l.id,
+        at: toMillis(l.at) || Date.now(),
+        user: l.user || CURRENT_USER,
+        field: l.field,
+        from: l.from,
+        to: l.to
+    };
+}
+
+function mapDto(x) {
+    const rawNumber = String(x.numContainer ?? "").replace(/\D/g, "");
+
+    const serial6 = rawNumber.length >= 7
+        ? rawNumber.slice(0, 6)
+        : rawNumber.padStart(6, "0").slice(-6);
+
+    const checkDigitFromDto = x.checkDigit != null
+        ? String(x.checkDigit)
+        : (rawNumber.length >= 7 ? rawNumber.slice(6, 7) : "");
+
+    const number = (serial6 + checkDigitFromDto).padEnd(7, "0");
+
+    const retired = x.isRetired != null
+        ? !!x.isRetired
+        : (x.isUnretired != null ? !x.isUnretired : false);
+
+    return {
+        id: x.id,
+        prefix: x.prefix || x.prefixName || "",
+        number,
+
+        typeId: x.typeId ?? null,
+        typeLegacy: x.typeCaption || x.typeLegacy || "",
+        iso: x.isoCode || x.isoTypeCode || "",
+
+        pw: x.tareStencilKg != null ? Math.round(Number(x.tareStencilKg)) : null,
+        tareFact: x.tareFactKg != null ? Math.round(Number(x.tareFactKg)) : null,
+        gross: x.grossKg != null ? Math.round(Number(x.grossKg)) : null,
+        grossRepeat: x.grossRepeatKg != null ? Math.round(Number(x.grossRepeatKg)) : null,
+
+        state: x.state || "inuse",
+        procState: x.procState || "",
+
+        owner: x.responsible || "Не назначен",
+        kgmk: !!x.isKgmk,
+        retired,
+
+        block: x.block || null,
+        bay: x.bay != null ? Number(x.bay) : null,
+        tier: x.tier != null ? Number(x.tier) : null,
+
+        docs: (x.docs || []).map(mapDocDto),
+        moveLog: (x.moveLog || []).map(mapMoveDto).filter(Boolean),
+        changeLog: (x.changeLog || []).map(mapChangeDto),
+
+        createdAt: toMillis(x.createdAt) || Date.now(),
+        updatedAt: toMillis(x.updatedAt) || Date.now(),
+
+        note: x.notes || ""
+    };
+}
+
+/* ============================================================
+   ЗАГРУЗКА ДАННЫХ: ПОЛНЫЙ СПИСОК
+============================================================ */
+
+function buildLayoutFromData(dataList) {
+    const layoutMap = new Map();
+
+    dataList.forEach(d => {
+        if (!d.block) return;
+
+        if (!layoutMap.has(d.block)) {
+            layoutMap.set(d.block, { bays: new Set() });
+        }
+
+        if (d.bay != null) {
+            layoutMap.get(d.block).bays.add(Number(d.bay));
+        }
+    });
+
+    return layoutMap;
+}
+
+async function loadDictionaries() {
+    try {
+        const [ownersRes, prefixesRes, statesRes, typesRes] = await Promise.all([
+            fetch(`${API_BASE}/dictionaries/owners`),
+            fetch(`${API_BASE}/dictionaries/prefixes`),
+            fetch(`${API_BASE}/dictionaries/states`),
+            fetch(`${API_BASE}/dictionaries/types`)
+        ]);
+
+        if (ownersRes.ok) {
+            OWNERS = await ownersRes.json();
+
+            const ownerSelect = $("#f-owner");
+            const bulkOwnerSelect = $("#bb-owner");
+
+            const optionsHtml = OWNERS
+                .map(o => `<option value="${o.fullName}">${o.fullName}</option>`)
+                .join("");
+
+            if (ownerSelect) {
+                ownerSelect.innerHTML = `<option value="">Не назначен</option>` + optionsHtml;
+            }
+
+            if (bulkOwnerSelect) {
+                bulkOwnerSelect.innerHTML = `<option value="">— не менять —</option>` + optionsHtml;
+            }
+        }
+
+        if (prefixesRes.ok) {
+            const prefixesJson = await prefixesRes.json();
+            PREFIXES = prefixesJson.map(p => p.prefix).filter(Boolean);
+        }
+
+        if (statesRes.ok) {
+            const statesJson = await statesRes.json();
+
+            statesJson.forEach(s => {
+                if (!s.code) return;
+
+                STATES[s.code] = {
+                    name: s.name || s.code,
+                    color: s.colorHex || STATES[s.code]?.color || "#888",
+                    hex: s.colorHex || STATES[s.code]?.hex || "#888",
+                    pulse: !!s.pulse
+                };
+            });
+        }
+
+        if (typesRes.ok) {
+            const typesJson = await typesRes.json();
+
+            window.CONTAINER_TYPES = typesJson.filter(t => !isJunkType(t.caption));
+            ALL_TYPES = window.CONTAINER_TYPES.map(t => t.caption).filter(Boolean);
+        } else {
+            window.CONTAINER_TYPES = DEMO_TYPES.map(caption => ({ caption }));
+            ALL_TYPES = [...DEMO_TYPES];
+        }
+
+    } catch (e) {
+        console.warn("Не удалось загрузить справочники, используем дефолтные", e);
+
+        window.CONTAINER_TYPES = DEMO_TYPES.map(caption => ({ caption }));
+        ALL_TYPES = [...DEMO_TYPES];
+    }
+}
+
+async function fetchAllContainers() {
+    const out = [];
+    let page = 0;
+    const size = pagination.chunkSize;
+
+    while (true) {
+        const params = new URLSearchParams({
+            page: String(page),
+            size: String(size)
         });
 
-        if (!res.ok) throw new Error("Ошибка сохранения координат");
+        const res = await fetch(`${API_BASE}/containers?${params.toString()}`);
+        if (!res.ok) throw new Error("Ошибка загрузки контейнеров");
 
-        let mapped = null;
+        const chunk = await res.json();
+        if (!Array.isArray(chunk)) throw new Error("API вернул не массив контейнеров");
 
-        const dataRes = await fetch(`${API_BASE}/containers/${containerId}`);
-        if (dataRes.ok) {
-            mapped = mapDto(await dataRes.json());
-        }
+        out.push(...chunk);
 
-        const existingIdx = DATA.findIndex(d => d.id === containerId);
+        if (chunk.length < size) break;
 
-        if (mapped) {
-            if (existingIdx >= 0) DATA[existingIdx] = mapped;
-            else DATA.push(mapped);
-        } else if (existingIdx >= 0) {
-            DATA[existingIdx].block = target.block;
-            DATA[existingIdx].bay = target.bay;
-            DATA[existingIdx].tier = target.tier;
-        }
+        page++;
+
+        if (page > 1000) break;
+    }
+
+    return out;
+}
+
+async function loadData() {
+    pagination.isLoading = true;
+
+    try {
+        await loadDictionaries();
+
+        DATA = [];
+        LAYOUT = new Map();
+
+        const arr = await fetchAllContainers();
+
+        DATA = arr.map(mapDto);
+        dataSource = "db";
+
+        pagination.totalElements = DATA.length;
+        pagination.hasMore = false;
 
         LAYOUT = buildLayoutFromData(DATA);
 
-        closeSlotPicker();
-
-        toast("Контейнер установлен");
-
-        buildFacets();
-        render(false);
+        DATA.forEach(d => {
+            d.docs = d.docs || [];
+            d.moveLog = d.moveLog || [];
+            d.changeLog = d.changeLog || [];
+        });
 
     } catch (e) {
-        console.error(e);
-        toast("Ошибка установки контейнера", true);
+        console.error("Ошибка загрузки БД, фолбэк на демо", e);
+
+        DATA = genData(1240);
+        dataSource = "demo";
+
+        LAYOUT = buildLayoutFromData(DATA);
+        pagination.totalElements = DATA.length;
+        pagination.hasMore = false;
+    } finally {
+        pagination.isLoading = false;
     }
-};
+
+    $("#total").textContent = fmt(pagination.totalElements);
+
+    buildFacets();
+    updateTopCounters();
+}
+
+async function reloadAllData(resetScroll = true) {
+    await loadData();
+    render(resetScroll);
+}
+
+// Infinite scroll больше не нужен.
+function setupInfiniteScroll() {}
+
+// Совместимость со старыми вызовами.
+async function loadPage() {
+    await reloadAllData(true);
+}
+
+async function refreshFacets() {
+    buildFacets();
+    updateTopCounters();
+}
+
+/* ============================================================
+   COMBOBOX
+============================================================ */
+
+function initCombobox(inputId, listId, containerId, getDataFn) {
+    const input = document.getElementById(inputId);
+    const list = document.getElementById(listId);
+    const container = document.getElementById(containerId);
+
+    if (!input || !list || !container) return;
+
+    const toggleList = show => {
+        if (show) {
+            container.classList.add("open");
+            renderOptions(input.value);
+        } else {
+            setTimeout(() => container.classList.remove("open"), 150);
+        }
+    };
+
+    const renderOptions = (filterText = "") => {
+        const items = getDataFn() || [];
+        const filter = String(filterText || "").toUpperCase();
+
+        const filtered = items
+            .map(item => typeof item === "string" ? item : item.caption)
+            .filter(Boolean)
+            .filter(val => !isJunkType(val))
+            .filter(val => val.toUpperCase().includes(filter))
+            .sort((a, b) => a.localeCompare(b, "ru"));
+
+        const limited = filtered.slice(0, 80);
+
+        list.innerHTML = limited.map(val => {
+            const selected = val === input.value ? "selected" : "";
+            return `<div class="option ${selected}" data-value="${val}">${val}</div>`;
+        }).join("");
+
+        if (!limited.length) {
+            list.innerHTML = `<div class="option" style="color:var(--muted);cursor:default;">Ничего не найдено</div>`;
+        }
+    };
+
+    input.addEventListener("focus", () => toggleList(true));
+    input.addEventListener("click", () => toggleList(true));
+
+    document.addEventListener("click", e => {
+        if (!container.contains(e.target)) toggleList(false);
+    });
+
+    input.addEventListener("input", e => {
+        renderOptions(e.target.value);
+        container.classList.add("open");
+    });
+
+    list.addEventListener("click", e => {
+        const option = e.target.closest(".option");
+        if (!option || !option.dataset.value) return;
+
+        input.value = option.dataset.value;
+        toggleList(false);
+        input.dispatchEvent(new Event("input"));
+    });
+}
+
+/* ============================================================
+   ОБЩИЕ HELPERS
+============================================================ */
+
+function typeAttrs(caption) {
+    const c = String(caption || "").toUpperCase();
+
+    if (c.includes("40") || c.includes("HC") || c.includes("1AX")) return { pw: 3900, maxStack: 7 };
+    if (c.includes("РЕФР") || c.includes("R1")) return { pw: 3050, maxStack: 7 };
+    if (c.includes("ТАНК") || c.includes("T1")) return { pw: 3600, maxStack: 7 };
+    if (c.includes("OPEN") || c.includes("U1") || c.includes("OT")) return { pw: 2350, maxStack: 7 };
+
+    return { pw: 2300, maxStack: 7 };
+}
+
+function typeLabel(d) {
+    return d.typeLegacy || d.iso || "—";
+}
+
+function tierLimitByItem(d) {
+    return Math.min(HARD_MAX, typeAttrs(typeLabel(d)).maxStack);
+}
+
+function topTier(block, bay) {
+    let m = 0;
+
+    for (const d of DATA) {
+        if (d.block === block && Number(d.bay) === Number(bay) && Number(d.tier) > m) {
+            m = Number(d.tier);
+        }
+    }
+
+    return m;
+}
+
+function isProblem(d) {
+    return d.state === "damaged" || d.state === "repair";
+}
+
+function dispWeight(d) {
+    return d.gross != null ? d.gross : (d.tareFact != null ? d.tareFact : (d.pw || 0));
+}
+
+function hasDoc(d, t) {
+    return (d.docs || []).some(x => x.type === t);
+}
+
+function typeCaptions() {
+    const m = new Map();
+
+    DATA.forEach(d => {
+        const k = d.typeLegacy || "—";
+        if (isJunkType(k)) return;
+        m.set(k, (m.get(k) || 0) + 1);
+    });
+
+    return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0], "ru"));
+}
+
+function compactStack(block, bay) {
+    const items = DATA
+        .filter(d => d.block === block && Number(d.bay) === Number(bay))
+        .sort((a, b) => a.tier - b.tier);
+
+    items.forEach((d, i) => d.tier = i + 1);
+}
+
+function checkTierLimit(name, block, bay, newTier) {
+    if (newTier > HARD_MAX) {
+        return { ok: false, reason: `превышен абсолютный предел площадки (${HARD_MAX} ярусов)` };
+    }
+
+    const lt = Math.min(HARD_MAX, typeAttrs(name).maxStack);
+
+    if (newTier > lt) {
+        return { ok: false, reason: `для типа «${name}» допустимо ≤ ${lt} ярусов` };
+    }
+
+    if (newTier > 1) {
+        const under = DATA.find(x => x.block === block && Number(x.bay) === Number(bay) && Number(x.tier) === newTier - 1);
+
+        if (under) {
+            const lu = tierLimitByItem(under);
+
+            if (newTier > lu) {
+                return { ok: false, reason: `нижний контейнер (${typeLabel(under)}) выдерживает ≤ ${lu} ярусов` };
+            }
+        }
+    }
+
+    return { ok: true };
+}
+
+/* ============================================================
+   ФИЛЬТРЫ И СЧЁТЧИКИ
+============================================================ */
+
+function chipHTML(facet, val, name, count, color, hasDot) {
+    return `<button class="chip" data-facet="${facet}" data-val="${val}">
+        ${hasDot
+            ? `<span class="c-dot" style="background:${color}"></span>`
+            : `<span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span>`
+        }
+        <span class="c-name">${name}</span>
+        <span class="c-count">${fmt(count)}</span>
+    </button>`;
+}
+
+function buildFacets() {
+    const fill = (id, entries, hasDot) => {
+        const f = $(id);
+        if (!f) return;
+
+        f.querySelectorAll(".chip").forEach(c => c.remove());
+
+        entries.forEach(([val, name, count, color]) => {
+            f.insertAdjacentHTML(
+                "beforeend",
+                chipHTML(id.split("-")[1], val, name, count, color, hasDot)
+            );
+        });
+    };
+
+    fill("#facet-state", [
+        [
+            "inuse",
+            STATES.inuse?.name || "Удовлетворительное",
+            DATA.filter(d => d.state === "inuse").length,
+            STATES.inuse?.hex || "#2f6b4f"
+        ],
+        [
