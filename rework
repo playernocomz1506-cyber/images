@@ -1,13 +1,18 @@
-$("#resetBtn").onclick = () => {
-    filters.state.clear();
-    filters.proc.clear();
-    filters.type.clear();
-    filters.own.clear();
+$("#viewSeg").querySelectorAll("button").forEach(b => b.onclick = () => {
+    if (drag) cleanupDrag();
 
-    query = "";
-    $("#search").value = "";
+    if (marquee) {
+        if (marquee.el) marquee.el.remove();
+        marquee = null;
+    }
 
-    document.querySelectorAll(".chip.active").forEach(c => c.classList.remove("active"));
+    clearSelection();
 
-    applyChange(true);
-};
+    view = b.dataset.view;
+
+    $("#viewSeg").querySelectorAll("button").forEach(x => {
+        x.classList.toggle("on", x === b);
+    });
+
+    render(true);
+});
