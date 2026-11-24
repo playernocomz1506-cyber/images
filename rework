@@ -830,3 +830,3029 @@ function buildFacets() {
             STATES.inuse?.hex || "#2f6b4f"
         ],
         [
+            "damaged",
+            STATES.damaged?.name || "Брак",
+            DATA.filter(d => d.state === "damaged").length,
+            STATES.damaged?.hex || "#9c3b22"
+        ]
+    ], true);
+
+    const procEntries = [
+        [
+            "__none",
+            "не в операции",
+            DATA.filter(d => !d.procState).length,
+            "#9aa7b4"
+        ]
+    ];
+
+    Object.entries(PROC).forEach(([code, p]) => {
+        procEntries.push([
+            code,
+            p.name,
+            DATA.filter(d => d.procState === code).length,
+            p.hex
+        ]);
+    });
+
+    fill("#facet-proc", procEntries, true);
+
+    const typeCounts = new Map();
+
+    (window.CONTAINER_TYPES || []).forEach(t => {
+        if (!t.caption || isJunkType(t.caption)) return;
+        typeCounts.set(t.caption, 0);
+    });
+
+    DATA.forEach(d => {
+        const cap = d.typeLegacy || "—";
+        if (isJunkType(cap)) return;
+        typeCounts.set(cap, (typeCounts.get(cap) || 0) + 1);
+    });
+
+    const typeEntries = Array.from(typeCounts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0], "ru"))
+        .map(([cap, count]) => [cap, cap, count, null]);
+
+    fill("#facet-type", typeEntries, false);
+
+    fill("#facet-own", [
+        [
+            "kgmk",
+            "Собственность КГМК",
+            DATA.filter(d => d.kgmk).length,
+            "var(--accent)"
+        ],
+        [
+            "other",
+            "Прочие / аренда",
+            DATA.filter(d => !d.kgmk).length,
+            "#8593a1"
+        ]
+    ], false);
+
+    document.querySelectorAll(".chip").forEach(c => {
+        const set = filters[c.dataset.facet];
+        if (!set) return;
+
+        if (set.has(c.dataset.val)) {
+            c.classList.add("active");
+        }
+
+        c.onclick = () => {
+            if (set.has(c.dataset.val)) set.delete(c.dataset.val);
+            else set.add(c.dataset.val);
+
+            c.classList.toggle("active");
+            applyChange(true);
+        };
+    });
+}
+
+function getFiltered() {
+    let arr = DATA.filter(d => {
+        if (filters.state.size && !filters.state.has(d.state)) return false;
+
+        if (filters.proc.size) {
+            const v = d.procState || "__none";
+            if (!filters.proc.has(v)) return false;
+        }
+
+        if (filters.type.size && !filters.type.has(d.typeLegacy || "—")) return false;
+
+        if (filters.own.size && !filters.own.has(d.kgmk ? "kgmk" : "other")) return false;
+
+        if (query) {
+            const q = query.toUpperCase().replace(/\s+/g, "");
+            if (!(d.prefix + d.number).toUpperCase().includes(q)) return false;
+        }
+
+        return true;
+    });
+
+    if (sort === "num") {
+        arr.sort((a, b) => (a.prefix + a.number).localeCompare(b.prefix + b.number));
+    }
+
+    if (sort === "state") {
+        arr.sort((a, b) => a.state.localeCompare(b.state) || (a.prefix + a.number).localeCompare(b.prefix + b.number));
+    }
+
+    if (sort === "proc") {
+        arr.sort((a, b) => (a.procState || "").localeCompare(b.procState || "") || (a.prefix + a.number).localeCompare(b.prefix + b.number));
+    }
+
+    if (sort === "weight") {
+        arr.sort((a, b) => (b.gross || 0) - (a.gross || 0));
+    }
+
+    return arr;
+}
+
+function animateNumber(el, to) {
+    if (!el) return;
+
+    to = Number(to) || 0;
+
+    const from = +(el.dataset.v || 0);
+    el.dataset.v = to;
+
+    if (from === to) {
+        el.textContent = fmt(to);
+        return;
+    }
+
+    const t0 = performance.now();
+    const dur = 420;
+
+    (function step(t) {
+        const k = Math.min(1, (t - t0) / dur);
+        const e = 1 - Math.pow(1 - k, 3);
+
+        el.textContent = fmt(Math.round(from + (to - from) * e));
+
+        if (k < 1) requestAnimationFrame(step);
+    })(t0);
+}
+
+function updateTopCounters() {
+    animateNumber($("#cnt-inuse"), DATA.filter(d => d.state === "inuse").length);
+    animateNumber($("#cnt-alert"), DATA.filter(d => isProblem(d)).length);
+
+    animateNumber($("#cnt-a"), DATA.filter(d => d.procState === "arrival").length);
+    animateNumber($("#cnt-w"), DATA.filter(d => d.procState === "weighing").length);
+    animateNumber($("#cnt-s"), DATA.filter(d => d.procState === "storage").length);
+    animateNumber($("#cnt-h"), DATA.filter(d => d.procState === "shipment").length);
+}
+
+/* ============================================================
+   ВИРТУАЛИЗАЦИЯ И РЕНДЕР
+============================================================ */
+
+function makeVirtual(outer, { rowH, columns, items, buildItem, mode, fresh }) {
+    outer.innerHTML = "";
+
+    const inner = document.createElement("div");
+    inner.className = "vroot";
+    outer.appendChild(inner);
+
+    const win = document.createElement("div");
+    win.className = "vwindow" + (fresh ? " fresh" : "");
+
+    if (mode === "grid") {
+        win.style.display = "grid";
+        win.style.gridTemplateColumns = `repeat(${columns},minmax(0,1fr))`;
+        win.style.gridAutoRows = rowH + "px";
+        win.style.columnGap = "18px";
+        win.style.alignItems = "start";
+    } else {
+        win.style.display = "flex";
+        win.style.flexDirection = "column";
+    }
+
+    inner.appendChild(win);
+
+    const state = { columns, rowH, mode };
+
+    const rowCount = () => mode === "grid"
+        ? Math.max(1, Math.ceil(items.length / state.columns))
+        : items.length;
+
+    const setInnerH = () => {
+        inner.style.height = (rowCount() * rowH) + "px";
+    };
+
+    setInnerH();
+
+    function paint() {
+        const viewH = outer.clientHeight || 600;
+        const firstRow = Math.max(0, Math.floor(outer.scrollTop / rowH) - OVER);
+        const lastRow = Math.min(rowCount() - 1, Math.floor((outer.scrollTop + viewH - 1) / rowH) + OVER);
+
+        const a = mode === "grid" ? firstRow * state.columns : firstRow;
+        const b = mode === "grid"
+            ? Math.min(items.length, (lastRow + 1) * state.columns)
+            : (lastRow + 1);
+
+        let html = "";
+
+        for (let i = a; i < b; i++) {
+            html += buildItem(items[i]);
+        }
+
+        win.innerHTML = html;
+        win.style.top = (firstRow * rowH) + "px";
+
+        win.querySelectorAll("[data-id]").forEach(n => {
+            if (n.classList.contains("gbox")) return;
+            n.onclick = () => openDrawer(+n.dataset.id);
+        });
+    }
+
+    let raf = 0;
+
+    outer.onscroll = () => {
+        if (!raf) {
+            raf = requestAnimationFrame(() => {
+                raf = 0;
+                paint();
+            });
+        }
+    };
+
+    outer._v = {
+        paint,
+        refreshCols(nc) {
+            if (mode === "grid" && nc && nc !== state.columns) {
+                state.columns = nc;
+                win.style.gridTemplateColumns = `repeat(${nc},minmax(0,1fr))`;
+                setInnerH();
+            }
+
+            paint();
+        }
+    };
+
+    paint();
+}
+
+function yardCols() {
+    const w = yard.clientWidth - 48;
+    return Math.max(1, Math.floor((w + 18) / (MINCOL + 18)));
+}
+
+function procChipHTML(d) {
+    if (!d.procState) return `<span class="pr-chip none">—</span>`;
+
+    const p = procOf(d.procState);
+    if (!p) return `<span class="pr-chip none">${d.procState}</span>`;
+
+    return `<span class="pr-chip" style="color:${p.hex}">
+        <span class="d" style="background:${p.color}"></span>${p.name}
+    </span>`;
+}
+
+function boxHTML(d) {
+    const s = stateOf(d.state);
+    const cc = computedCheck(d);
+    const shown = String(d.number || "")[6];
+    const bad = shown !== undefined && +shown !== cc;
+
+    return `<div class="box ${s.pulse ? 'pulse' : ''} ${d.retired ? 'is-retired' : ''} ${d.id === selectedId ? 'sel' : ''}"
+        style="--c:${s.color}" data-id="${d.id}">
+        <div class="roof"></div>
+        <div class="wall">
+            <div class="toprow">
+                <span class="prefix">${d.prefix}</span>
+                <span class="status-led" title="${s.name}"></span>
+            </div>
+            <div class="num">${String(d.number || "").slice(0, 6)}<span class="chk ${bad ? 'bad' : ''}">${shown ?? "–"}</span></div>
+            <div class="meta">
+                <span class="type">${typeLabel(d)}</span>
+                <span class="wt">${fmt(dispWeight(d))} кг</span>
+            </div>
+        </div>
+        <div class="footer">
+            <span class="who"><span class="av">${initials(d.owner)}</span>${String(d.owner || "—").split(" ")[0]}</span>
+            ${d.kgmk ? `<span class="badge-kgmk">КГМК</span>` : `<span style="opacity:.7">аренда</span>`}
+        </div>
+    </div>`;
+}
+
+function rowHTML(d) {
+    const s = stateOf(d.state);
+    const cc = computedCheck(d);
+    const shown = String(d.number || "")[6];
+    const bad = shown !== undefined && +shown !== cc;
+
+    const m = (lbl, val) => `<div class="m">
+        <span class="ml">${lbl}</span>
+        <span class="mv ${val == null ? 'emp' : ''}">${val == null ? '—' : fmt(val)}</span>
+    </div>`;
+
+    return `<div class="row ${d.id === selectedId ? 'sel' : ''}" data-id="${d.id}">
+        <div class="mini" style="--c:${s.color}"><span class="led"></span></div>
+        <div class="id">
+            <div class="pn">${d.prefix} ${String(d.number || "").slice(0, 6)}<span class="chk ${bad ? 'bad' : ''}">·${shown ?? "–"}</span></div>
+            <div class="ty">${typeLabel(d)}</div>
+        </div>
+        <div class="masses">${m("траф.", d.pw)}${m("тара", d.tareFact)}${m("брутто", d.gross)}</div>
+        <div class="st-chip"><span class="d" style="background:${s.color}"></span>${s.name}</div>
+        ${procChipHTML(d)}
+        <div class="who2"><span class="av">${initials(d.owner)}</span>${d.owner}</div>
+        <div class="tags">
+            ${d.kgmk ? `<span class="tag k">КГМК</span>` : `<span class="tag">аренда</span>`}
+            ${d.retired ? `<span class="tag r">выведен</span>` : ""}
+        </div>
+    </div>`;
+}
+
+function applyChange(resetScroll) {
+    if (view === "stacks") updateStackHighlights();
+    else render(resetScroll);
+}
+
+function render(resetScroll) {
+    const arr = getFiltered();
+
+    $("#shown").textContent = fmt(arr.length);
+    $("#total").textContent = fmt(DATA.length);
+
+    try {
+        updateTopCounters();
+    } catch (e) {
+        console.warn("Счётчики не обновились", e);
+    }
+
+    const sp = $("#srcPill");
+    if (sp) {
+        sp.textContent = dataSource === "db" ? ("БД: " + fmt(DATA.length)) : ("ДЕМО: " + fmt(DATA.length));
+        sp.classList.toggle("src-db", dataSource === "db");
+    }
+
+    $("#sortCtl").classList.toggle("dim-ctl", view === "stacks");
+    yardWrap.classList.toggle("is-stacks", view === "stacks");
+
+    const yh = $("#yardHint");
+    if (yh) {
+        yh.style.display = (view === "stacks" && dataSource === "demo") ? "inline-flex" : "none";
+    }
+
+    if (resetScroll) yard.scrollTop = 0;
+
+    yard.onscroll = null;
+    yard._v = null;
+
+    if (!arr.length && view !== "stacks") {
+        yard.innerHTML = `<div class="empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                <rect x="2" y="6" width="20" height="12" rx="1.5"/>
+                <path d="M6 6v12M10 6v12M14 6v12M18 6v12"/>
+            </svg>
+            <div>Под текущие фильтры контейнеров не нашлось.</div>
+        </div>`;
+
+        syncBulkUI();
+        return;
+    }
+
+    if (view === "yard") {
+        makeVirtual(yard, {
+            rowH: ROWH.yard,
+            columns: yardCols(),
+            items: arr,
+            buildItem: boxHTML,
+            mode: "grid",
+            fresh: resetScroll
+        });
+    } else if (view === "list") {
+        makeVirtual(yard, {
+            rowH: ROWH.list,
+            columns: 1,
+            items: arr,
+            buildItem: rowHTML,
+            mode: "col",
+            fresh: resetScroll
+        });
+    } else if (view === "groups") {
+        renderGroups(arr, resetScroll);
+    } else {
+        renderStacks();
+    }
+
+    syncBulkUI();
+}
+
+/* ============================================================
+   ГРУППЫ
+============================================================ */
+
+function renderGroups(arr, fresh) {
+    const order = ["damaged", "inuse"];
+    const scrollPositions = {};
+
+    if (!fresh) {
+        yard.querySelectorAll(".gcol-scroll").forEach(sc => {
+            scrollPositions[sc.dataset.state] = sc.scrollTop;
+        });
+    }
+
+    if (fresh || !yard.querySelector(".groups")) {
+        yard.innerHTML = `<div class="groups">` + order.map(k => {
+            const s = stateOf(k);
+
+            return `<div class="gcol" data-group-state="${k}">
+                <div class="gh">
+                    <span class="d" style="background:${s.color}"></span>
+                    <span class="t">${s.name}</span>
+                    <span class="n" id="grp-cnt-${k}">0</span>
+                </div>
+                <div class="gcol-scroll" data-state="${k}"></div>
+            </div>`;
+        }).join("") + `</div>`;
+
+        setupGroupDropZones();
+    }
+
+    yard.querySelectorAll(".gcol-scroll").forEach(sc => {
+        const k = sc.dataset.state;
+        const items = arr.filter(d => d.state === k);
+        const cntEl = $(`#grp-cnt-${k}`);
+
+        if (cntEl) cntEl.textContent = fmt(items.length);
+
+        if (!items.length) {
+            sc.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:8px 6px;text-align:center">пусто</div>`;
+            return;
+        }
+
+        makeVirtual(sc, {
+            rowH: ROWH.g,
+            columns: 1,
+            items,
+            buildItem: gboxHTMLInteractive,
+            mode: "col",
+            fresh
+        });
+
+        if (!fresh && scrollPositions[k] !== undefined) {
+            sc.scrollTop = scrollPositions[k];
+        }
+    });
+}
+
+function gboxHTMLInteractive(d) {
+    const isSel = selectedIds.has(d.id);
+    const s = stateOf(d.state);
+
+    return `<div class="gbox ${isSel ? 'bulk-sel' : ''} ${d.id === selectedId ? 'sel' : ''}"
+        style="--c:${s.color}"
+        data-id="${d.id}"
+        draggable="${canWrite() ? 'true' : 'false'}"
+        ondragstart="onGroupDragStart(event, ${d.id})"
+        onclick="toggleGroupSelection(event, ${d.id})">
+        <div class="pn">${d.prefix} ${d.number}</div>
+        <div class="sub">
+            <span>${typeLabel(d)}</span>
+            <span>${fmt(dispWeight(d))} кг</span>
+        </div>
+    </div>`;
+}
+
+let draggedGroupId = null;
+
+window.onGroupDragStart = function(e, id) {
+    if (!canWrite()) {
+        e.preventDefault();
+        return;
+    }
+
+    draggedGroupId = id;
+    e.dataTransfer.effectAllowed = "move";
+
+    setTimeout(() => e.target.classList.add("dragging"), 0);
+};
+
+window.toggleGroupSelection = function(e, id) {
+    if (e.defaultPrevented) return;
+
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
+
+    renderGroups(getFiltered(), false);
+    syncBulkUI();
+};
+
+function setupGroupDropZones() {
+    document.querySelectorAll(".gcol").forEach(col => {
+        col.addEventListener("dragover", e => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            col.classList.add("drag-over");
+        });
+
+        col.addEventListener("dragleave", () => {
+            col.classList.remove("drag-over");
+        });
+
+        col.addEventListener("drop", e => {
+            e.preventDefault();
+            col.classList.remove("drag-over");
+
+            const newState = col.dataset.groupState;
+
+            if (draggedGroupId && newState) {
+                moveContainerToGroup(draggedGroupId, newState);
+            }
+
+            draggedGroupId = null;
+        });
+    });
+}
+
+async function moveContainerToGroup(id, newState) {
+    const container = DATA.find(d => d.id === id);
+    if (!container || container.state === newState) return;
+
+    const oldState = container.state;
+    container.state = newState;
+
+    renderGroups(getFiltered(), false);
+    buildFacets();
+    updateTopCounters();
+
+    toast(`Контейнер ${container.prefix} ${container.number} → ${stateOf(newState).name}`);
+
+    if (dataSource === "db") {
+        try {
+            const res = await fetch(`${API_BASE}/containers/${id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ state: newState })
+            });
+
+            if (!res.ok) throw new Error("Failed to update state");
+
+            buildFacets();
+            updateTopCounters();
+
+        } catch (e) {
+            console.error(e);
+
+            container.state = oldState;
+            renderGroups(getFiltered(), false);
+            buildFacets();
+            updateTopCounters();
+
+            toast("Ошибка обновления состояния", true);
+        }
+    }
+}
+
+/* ============================================================
+   ШТАБЕЛИ
+============================================================ */
+
+function groupBlocks() {
+    const blocks = new Map();
+
+    for (const d of DATA) {
+        if (!d.block || d.bay == null || d.tier == null) continue;
+
+        const block = d.block;
+        const bay = Number(d.bay);
+
+        if (!blocks.has(block)) blocks.set(block, new Map());
+
+        const b = blocks.get(block);
+
+        if (!b.has(bay)) b.set(bay, []);
+
+        b.get(bay).push(d);
+    }
+
+    return blocks;
+}
+
+function renderOneBlock(name, idxAll = null) {
+    const lay = LAYOUT.get(name);
+    const idx = (idxAll || groupBlocks()).get(name) || new Map();
+
+    const knownBays = new Set();
+
+    if (lay && lay.bays) {
+        const source = lay.bays instanceof Set ? lay.bays : new Set(lay.bays);
+        source.forEach(x => knownBays.add(Number(x)));
+    }
+
+    idx.forEach((_, bay) => knownBays.add(Number(bay)));
+
+    let bays = Array.from(knownBays).sort((a, b) => a - b);
+
+    const MIN_BAYS = 20;
+    const maxBay = Math.max(MIN_BAYS, 0, ...bays);
+
+    bays = [];
+    for (let i = 1; i <= maxBay; i++) bays.push(i);
+
+    let maxTier = 0;
+    let totalTiers = 0;
+
+    const piles = bays.map(bn => {
+        const items = (idx.get(bn) || []).slice().sort((a, b) => a.tier - b.tier);
+        const h = items.length ? Math.max(...items.map(i => Number(i.tier))) : 0;
+
+        if (h > maxTier) maxTier = h;
+        totalTiers += items.length;
+
+        const layers = items.map(d => {
+            const buried = h - Number(d.tier);
+            const bottomPos = (Number(d.tier) - 1) * TSTEP;
+            const s = stateOf(d.state);
+
+            return `<div class="tier ${d.id === selectedId ? 'sel' : ''} ${selectedIds.has(d.id) ? 'msel' : ''}"
+                style="--c:${s.color}; bottom:${bottomPos}px"
+                data-id="${d.id}"
+                title="${d.prefix} ${d.number} · ярус ${d.tier}${buried > 0 ? ` · снять ${buried} сверху` : ""}">
+                <span class="tn">${String(d.number || "").slice(2, 6)}</span>
+                ${buried > 0 ? `<span class="buried">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12l7 7 7-7"/></svg>${buried}
+                </span>` : ""}
+            </div>`;
+        }).join("");
+
+        let emptySlotsHtml = "";
+        const targetTier = h === 0 ? 1 : h + 1;
+
+        if (targetTier <= HARD_MAX) {
+            const bottomPos = (targetTier - 1) * TSTEP;
+
+            emptySlotsHtml = `<div class="empty-slot"
+                style="bottom:${bottomPos}px"
+                onclick="openSlotPicker('${name}', ${bn}, ${targetTier})"
+                title="Найти контейнер в БД и поставить сюда">
+                + T${targetTier}
+            </div>`;
+        }
+
+        const pileH = Math.max(1, HARD_MAX) * TSTEP;
+
+        return `<div class="stack-col" data-block="${name}" data-bay="${bn}">
+            <div class="pile" style="height:${pileH}px">${layers}${emptySlotsHtml}</div>
+            <div class="bay-no">${pad2(bn)}</div>
+        </div>`;
+    }).join("");
+
+    const axH = Math.max(1, maxTier + 1);
+
+    const axis = Array.from({ length: axH }, (_, i) => axH - i)
+        .map(t => `<span class="ta-m" style="bottom:${(t - 1) * TSTEP}px">T${t}</span>`)
+        .join("");
+
+    const cap = bays.length * HARD_MAX;
+    const load = cap ? Math.round(totalTiers / cap * 100) : 0;
+
+    return `<div class="stack-block" data-block="${name}">
+        <div class="sb-head">
+            <div class="sb-title"><span class="blk">${name}</span>Секция ${name}</div>
+            <div class="sb-meta">${bays.length} рядов · ${totalTiers} ярусов · лимит ≤${HARD_MAX}</div>
+            <div class="sb-load">загрузка <div class="bar"><i style="width:${load}%"></i></div>${load}%</div>
+        </div>
+        <div class="sb-body">
+            <div class="tier-axis" style="height:${axH * TSTEP}px">${axis}</div>
+            <div class="sb-row" style="height:${axH * TSTEP + 32}px">${piles}</div>
+        </div>
+    </div>`;
+}
+
+function renderStacks() {
+    const idx = groupBlocks();
+    const blockNames = [...idx.keys()].sort((a, b) => a.localeCompare(b, "ru"));
+
+    yard.innerHTML = `<div class="yard-stacks">` +
+        blockNames.map(name => renderOneBlock(name, idx)).join("") +
+        `</div>`;
+
+    updateStackHighlights();
+}
+
+let lastAimId = null;
+
+function updateStackHighlights() {
+    if (view !== "stacks") return;
+
+    const on = anyFilterActive();
+    const matched = on ? new Set(getFiltered().map(d => d.id)) : null;
+
+    yard.querySelectorAll(".tier").forEach(t => {
+        if (!on) {
+            t.classList.remove("hit", "dim");
+        } else {
+            const m = matched.has(+t.dataset.id);
+            t.classList.toggle("hit", m);
+            t.classList.toggle("dim", !m);
+        }
+    });
+
+    yard.querySelectorAll(".stack-block").forEach(bl => {
+        const rows = bl.querySelectorAll(".stack-col").length;
+        const total = bl.querySelectorAll(".tier").length;
+        const found = on ? bl.querySelectorAll(".tier.hit").length : total;
+
+        const meta = bl.querySelector(".sb-meta");
+        if (meta) {
+            meta.textContent = on
+                ? `${rows} рядов · найдено ${found} · лимит ≤${HARD_MAX}`
+                : `${rows} рядов · ${total} ярусов · лимит ≤${HARD_MAX}`;
+        }
+
+        bl.classList.toggle("has-hit", on && found > 0);
+    });
+
+    const placedCount = DATA.filter(d => d.block && d.bay != null && d.tier != null).length;
+    $("#shown").textContent = fmt(on ? matched.size : placedCount);
+
+    if (on && matched && matched.size >= 1 && matched.size <= 12) {
+        const first = [...matched][0];
+
+        if (first !== lastAimId) {
+            lastAimId = first;
+
+            const el = yard.querySelector('.tier[data-id="' + first + '"]');
+
+            if (el) {
+                const blk = el.closest(".stack-block");
+                if (blk) blk.scrollIntoView({ block: "center", behavior: "smooth" });
+
+                el.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+                el.classList.remove("search-ring");
+                void el.offsetWidth;
+                el.classList.add("search-ring");
+
+                setTimeout(() => el.classList.remove("search-ring"), 1500);
+            }
+        }
+    } else {
+        lastAimId = null;
+    }
+}
+
+/* ============================================================
+   ВЫДЕЛЕНИЕ, BULK, UNDO
+============================================================ */
+
+function clearSelection() {
+    if (!selectedIds.size) {
+        syncBulkUI();
+        return;
+    }
+
+    selectedIds.clear();
+
+    yard.querySelectorAll(".tier.msel,.tier.marquee-sel,.gbox.bulk-sel").forEach(t => {
+        t.classList.remove("msel", "marquee-sel", "bulk-sel");
+    });
+
+    syncBulkUI();
+}
+
+function syncBulkUI() {
+    const showBulk = (view === "stacks" || view === "groups") && selectedIds.size > 0;
+
+    $("#bulkBar").classList.toggle("show", showBulk);
+    $("#bb-n").textContent = selectedIds.size;
+    $("#bb-apply").disabled = !canWrite();
+
+    const n = actUndo().length;
+    const r = actRedo().length;
+    const ub = $("#undoBtn");
+    const rb = $("#redoBtn");
+    const writeOK = canWrite();
+
+    ub.classList.toggle("disabled", n === 0 || !writeOK);
+    ub.disabled = n === 0 || !writeOK;
+
+    rb.classList.toggle("disabled", r === 0 || !writeOK);
+    rb.disabled = r === 0 || !writeOK;
+
+    const badge = $("#undoBadge");
+    badge.textContent = n;
+    badge.style.display = n > 0 ? "flex" : "none";
+
+    if (n !== prevUndoLen) {
+        badge.classList.remove("bump");
+        void badge.offsetWidth;
+        badge.classList.add("bump");
+        prevUndoLen = n;
+    }
+
+    $("#undoRail").classList.toggle("has", view === "stacks" && n > 0);
+
+    buildRail();
+}
+
+function buildRail() {
+    const track = $("#urTrack");
+    if (!track) return;
+
+    track.querySelectorAll(".ur-tick,.ur-now").forEach(e => e.remove());
+
+    const stack = actUndo();
+
+    stack.forEach((s, i) => {
+        const t = document.createElement("div");
+        t.className = "ur-tick";
+        t.innerHTML = `<span class="dot"></span><span class="lb">${s.label || ("шаг " + (i + 1))}</span>`;
+        t.title = (s.at ? fmtDate(s.at) + " · " : "") + (s.label || "");
+
+        t.onclick = () => {
+            if (!canWrite()) return;
+
+            const steps = stack.length - i;
+            for (let k = 0; k < steps; k++) undoOne();
+
+            toast("Откат к шагу: " + (s.label || ("№" + (i + 1))));
+            updateStackHighlights();
+            syncBulkUI();
+        };
+
+        track.appendChild(t);
+    });
+
+    const now = document.createElement("div");
+    now.className = "ur-now";
+    now.innerHTML = `<span class="dot"></span><span class="lb">сейчас</span>`;
+    track.appendChild(now);
+
+    track.scrollLeft = track.scrollWidth;
+}
+
+function flipBlocksAfterApply(blocksSet, snapCoords) {
+    const oldMap = new Map();
+    snapCoords.forEach(c => oldMap.set(c.id, { x: c._x, y: c._y }));
+
+    const idx = groupBlocks();
+
+    blocksSet.forEach(bn => {
+        const el = yard.querySelector('.stack-block[data-block="' + bn + '"]');
+        if (el) el.outerHTML = renderOneBlock(bn, idx);
+    });
+
+    blocksSet.forEach(bn => {
+        const bl = yard.querySelector('.stack-block[data-block="' + bn + '"]');
+        if (!bl) return;
+
+        bl.querySelectorAll(".tier").forEach(t => {
+            const id = +t.dataset.id;
+            const o = oldMap.get(id);
+            if (!o || o.x == null) return;
+
+            const r = t.getBoundingClientRect();
+            const dx = o.x - r.left;
+            const dy = o.y - r.top;
+
+            if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+
+            t.style.transition = "none";
+            t.style.transform = `translate(${dx}px,${dy}px)`;
+
+            requestAnimationFrame(() => {
+                t.style.transition = "transform .44s cubic-bezier(.2,.85,.25,1)";
+                t.style.transform = "";
+            });
+
+            setTimeout(() => {
+                t.style.transition = "";
+                t.style.transform = "";
+            }, 460);
+        });
+    });
+}
+
+function stampRects(snap) {
+    snap.coords.forEach(c => {
+        const el = yard.querySelector('.tier[data-id="' + c.id + '"]');
+
+        if (el) {
+            const r = el.getBoundingClientRect();
+            c._x = r.left;
+            c._y = r.top;
+        } else {
+            c._x = null;
+            c._y = null;
+        }
+    });
+}
+
+function applySnapshot(snap, toStack) {
+    const reverse = { coords: [], logLens: [], label: snap.label, at: snap.at };
+    const blocksSet = new Set();
+
+    snap.coords.forEach(c => {
+        const d = DATA.find(x => x.id === c.id);
+        if (!d) return;
+
+        reverse.coords.push({
+            id: c.id,
+            block: d.block,
+            bay: d.bay,
+            tier: d.tier,
+            _x: c._x,
+            _y: c._y
+        });
+
+        blocksSet.add(c.block);
+    });
+
+    snap.logLens.forEach(l => {
+        const d = DATA.find(x => x.id === l.id);
+        if (d) reverse.logLens.push({ id: l.id, len: (d.moveLog || []).length });
+    });
+
+    snap.coords.forEach(c => {
+        const d = DATA.find(x => x.id === c.id);
+        if (d) {
+            d.block = c.block;
+            d.bay = c.bay;
+            d.tier = c.tier;
+        }
+    });
+
+    snap.logLens.forEach(l => {
+        const d = DATA.find(x => x.id === l.id);
+        if (d) d.moveLog = (d.moveLog || []).slice(0, l.len);
+    });
+
+    toStack.push(reverse);
+    if (toStack.length > STACK_CAP) toStack.shift();
+
+    LAYOUT = buildLayoutFromData(DATA);
+    flipBlocksAfterApply(blocksSet, snap.coords);
+}
+
+function undoOne() {
+    const s = actUndo().pop();
+    if (!s) return;
+    applySnapshot(s, actRedo());
+    return s;
+}
+
+function redoOne() {
+    const s = actRedo().pop();
+    if (!s) return;
+    applySnapshot(s, actUndo());
+    return s;
+}
+
+function undoLastMove() {
+    if (!canWrite()) return;
+
+    const s = undoOne();
+    if (!s) return;
+
+    toast("Движение отменено" + (s.label ? ": " + s.label : ""));
+    updateStackHighlights();
+    syncBulkUI();
+}
+
+function redoLastMove() {
+    if (!canWrite()) return;
+
+    const s = redoOne();
+    if (!s) return;
+
+    toast("Движение повторено" + (s.label ? ": " + s.label : ""));
+    updateStackHighlights();
+    syncBulkUI();
+}
+
+function performMove(removedIds, dstBlock, dstBay, label) {
+    const bySrc = new Map();
+
+    removedIds.forEach(id => {
+        const d = DATA.find(x => x.id === id);
+        if (!d) return;
+
+        const k = d.block + "|" + d.bay;
+
+        if (!bySrc.has(k)) {
+            bySrc.set(k, { block: d.block, bay: d.bay, min: d.tier });
+        } else {
+            bySrc.get(k).min = Math.min(bySrc.get(k).min, d.tier);
+        }
+    });
+
+    const snap = { coords: [], logLens: [], label, at: Date.now() };
+
+    bySrc.forEach(({ block, bay, min }) => {
+        DATA.forEach(d => {
+            if (d.block === block && Number(d.bay) === Number(bay) && d.tier >= min) {
+                snap.coords.push({ id: d.id, block: d.block, bay: d.bay, tier: d.tier });
+            }
+        });
+    });
+
+    removedIds.forEach(id => {
+        const d = DATA.find(x => x.id === id);
+        if (d) snap.logLens.push({ id: d.id, len: (d.moveLog || []).length });
+    });
+
+    stampRects(snap);
+
+    actUndo().push(snap);
+    if (actUndo().length > STACK_CAP) actUndo().shift();
+
+    actRedo().length = 0;
+
+    const order = removedIds
+        .map(id => DATA.find(x => x.id === id))
+        .filter(Boolean)
+        .sort((a, b) => (a.block + a.bay).localeCompare(b.block + b.bay) || a.tier - b.tier);
+
+    let h = topTier(dstBlock, dstBay);
+
+    order.forEach(d => {
+        h++;
+
+        const from = { block: d.block, bay: d.bay, tier: d.tier };
+
+        d.block = dstBlock;
+        d.bay = dstBay;
+        d.tier = h;
+
+        d.moveLog = d.moveLog || [];
+        d.moveLog.push({
+            at: Date.now(),
+            from,
+            to: { block: dstBlock, bay: dstBay, tier: h }
+        });
+    });
+
+    bySrc.forEach(({ block, bay }) => compactStack(block, bay));
+
+    LAYOUT = buildLayoutFromData(DATA);
+
+    const blocksSet = new Set([...bySrc.values()].map(v => v.block));
+    blocksSet.add(dstBlock);
+
+    flipBlocksAfterApply(blocksSet, snap.coords);
+
+    if (dataSource === "db") {
+        const movesPayload = removedIds.map(id => {
+            const d = DATA.find(x => x.id === id);
+            return d ? { id: d.id, block: d.block, bay: d.bay, tier: d.tier } : null;
+        }).filter(Boolean);
+
+        const url = planMode
+            ? `${API_BASE}/containers/plans/move`
+            : `${API_BASE}/containers/move`;
+
+        fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(movesPayload)
+        }).then(res => {
+            if (!res.ok) throw new Error("Network error");
+
+            if (planMode) {
+                movesPayload.forEach(m => {
+                    PLAN_DATA.set(m.id, { block: m.block, bay: m.bay, tier: m.tier });
+                });
+            }
+        }).catch(err => {
+            console.error("Ошибка синхронизации", err);
+            toast("Ошибка сохранения перемещения", true);
+        });
+    }
+}
+
+/* ============================================================
+   DRAG & DROP ШТАБЕЛЕЙ
+============================================================ */
+
+let drag = null;
+const DRAG_THRESHOLD = 4;
+
+const NO_SVG = `<svg class="dg-no" viewBox="0 0 24 24">
+    <circle cx="12" cy="12" r="10" fill="#fff" stroke="#b23a22" stroke-width="2.4"/>
+    <line x1="5" y1="5" x2="19" y2="19" stroke="#b23a22" stroke-width="2.4" stroke-linecap="round"/>
+</svg>`;
+
+function removedAboveFor(id) {
+    const d = DATA.find(x => x.id === id);
+    if (!d) return 0;
+    return topTier(d.block, d.bay) - d.tier;
+}
+
+function onTierPointerDown(e) {
+    if (view !== "stacks" || e.button !== 0) return;
+    if (!canWrite()) return;
+
+    const t = e.target.closest(".tier");
+    if (!t || !yard.contains(t)) return;
+    if ($("#drawer").classList.contains("open")) return;
+
+    const id = +t.dataset.id;
+    const d = DATA.find(x => x.id === id);
+    if (!d) return;
+
+    const group = selectedIds.size > 1 && selectedIds.has(id);
+
+    drag = {
+        id,
+        group,
+        groupIds: group ? [...selectedIds] : [id],
+        fromBlock: d.block,
+        fromBay: d.bay,
+        fromTier: d.tier,
+        movedName: typeLabel(d),
+        tierEl: t,
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+        curCol: null,
+        slot: null,
+        _pile: null,
+        _oldH: null,
+        canDrop: true,
+        denyReason: "",
+        ghost: null
+    };
+
+    e.preventDefault();
+}
+
+function startDrag() {
+    const d = drag;
+    d.active = true;
+
+    document.body.classList.add("dragging-active");
+
+    yard.querySelectorAll(".tier.hit,.tier.dim").forEach(t => t.classList.remove("hit", "dim"));
+
+    const srcs = new Set();
+
+    d.groupIds.forEach(id => {
+        const x = DATA.find(z => z.id === id);
+        if (x) srcs.add(x.block + "|" + x.bay);
+    });
+
+    d.groupIds.forEach(id => {
+        const el = yard.querySelector('.tier[data-id="' + id + '"]');
+        if (el) el.classList.add("dragging");
+    });
+
+    srcs.forEach(k => {
+        const [bl, bay] = k.split("|");
+
+        yard.querySelectorAll('.stack-col[data-block="' + bl + '"][data-bay="' + bay + '"] .tier').forEach(t => {
+            const dd = DATA.find(x => x.id === +t.dataset.id);
+            const isRemoved = d.groupIds.includes(+t.dataset.id);
+
+            if (dd && !isRemoved && d.groupIds.some(gid => {
+                const g = DATA.find(z => z.id === gid);
+                return g && g.block === dd.block && Number(g.bay) === Number(dd.bay) && dd.tier > g.tier;
+            })) {
+                t.classList.add("lifted");
+            }
+        });
+    });
+
+    const dd = DATA.find(x => x.id === d.id);
+    const s = stateOf(dd.state);
+
+    const g = document.createElement("div");
+    g.className = "drag-ghost" + (d.group ? " group" : "");
+    g.style.setProperty("--c", s.color);
+
+    g.innerHTML = d.group
+        ? `<div class="dg-box"><span class="gn">${d.groupIds.length}</span> ярус${d.groupIds.length > 1 && d.groupIds.length < 5 ? "а" : d.groupIds.length >= 5 ? "ов" : ""}${NO_SVG}</div>`
+        : `<div class="dg-box">${String(dd.number || "").slice(2, 6)}${NO_SVG}</div>`;
+
+    document.body.appendChild(g);
+    d.ghost = g;
+
+    moveGhost(d.startX, d.startY);
+}
+
+function moveGhost(x, y) {
+    if (drag && drag.ghost) {
+        drag.ghost.style.transform = `translate(${x}px,${y}px) translate(-50%,-58%) rotate(-4deg)`;
+    }
+}
+
+function currentDropCol(x, y) {
+    if (!drag || !drag.ghost) return null;
+
+    drag.ghost.style.display = "none";
+    let el = document.elementFromPoint(x, y);
+    drag.ghost.style.display = "";
+
+    if (!el) return null;
+
+    const col = el.closest(".stack-col");
+    if (!col) return null;
+
+    if (drag.groupIds.some(gid => {
+        const g = DATA.find(z => z.id === gid);
+        return g && g.block === col.dataset.block && Number(g.bay) === Number(col.dataset.bay);
+    })) {
+        return null;
+    }
+
+    return col;
+}
+
+function simulateGroupDrop(ids, block, bay) {
+    const order = ids
+        .map(id => DATA.find(x => x.id === id))
+        .filter(Boolean)
+        .sort((a, b) => (a.block + a.bay).localeCompare(b.block + b.bay) || a.tier - b.tier);
+
+    let h = topTier(block, bay);
+
+    for (const d of order) {
+        h++;
+        const c = checkTierLimit(typeLabel(d), block, bay, h);
+        if (!c.ok) return { ok: false, reason: c.reason };
+    }
+
+    return { ok: true };
+}
+
+function setDropTarget(col) {
+    if (drag.curCol === col) return;
+
+    clearDropTarget();
+
+    if (!col) return;
+
+    const block = col.dataset.block;
+    const bay = +col.dataset.bay;
+
+    let check;
+    let newTier;
+
+    if (drag.group) {
+        check = simulateGroupDrop(drag.groupIds, block, bay);
+        newTier = topTier(block, bay) + drag.groupIds.length;
+    } else {
+        newTier = topTier(block, bay) + 1;
+        check = checkTierLimit(drag.movedName, block, bay, newTier);
+    }
+
+    drag.curCol = col;
+    drag.canDrop = check.ok;
+    drag.denyReason = check.reason || "";
+
+    col.classList.add(check.ok ? "drop-target" : "drop-target-deny");
+
+    const pile = col.querySelector(".pile");
+    const oldH = +pile.style.height.replace("px", "") || 0;
+    const needH = newTier * TSTEP;
+
+    if (needH > oldH) pile.style.height = needH + "px";
+
+    const slot = document.createElement("div");
+    slot.className = "drop-slot" + (check.ok ? "" : " deny");
+    slot.style.bottom = ((newTier - 1) * TSTEP) + "px";
+
+    pile.appendChild(slot);
+
+    drag.slot = slot;
+    drag._pile = pile;
+    drag._oldH = oldH;
+
+    if (drag.ghost) drag.ghost.classList.toggle("deny", !check.ok);
+}
+
+function clearDropTarget() {
+    if (!drag) return;
+
+    if (drag.curCol) {
+        drag.curCol.classList.remove("drop-target", "drop-target-deny");
+    }
+
+    if (drag.slot) {
+        drag.slot.remove();
+        drag.slot = null;
+    }
+
+    if (drag._pile && drag._oldH != null) {
+        drag._pile.style.height = drag._oldH + "px";
+        drag._pile = null;
+        drag._oldH = null;
+    }
+
+    drag.curCol = null;
+    drag.canDrop = true;
+    drag.denyReason = "";
+
+    if (drag.ghost) drag.ghost.classList.remove("deny");
+}
+
+function autoScroll(x, y) {
+    const yr = yard.getBoundingClientRect();
+
+    if (y < yr.top + 48) yard.scrollTop -= 14;
+    else if (y > yr.bottom - 32) yard.scrollTop += 14;
+
+    const row = drag.curCol ? drag.curCol.closest(".sb-row") : null;
+
+    if (row) {
+        const rr = row.getBoundingClientRect();
+
+        if (x < rr.left + 40) row.scrollLeft -= 16;
+        else if (x > rr.right - 40) row.scrollLeft += 16;
+    }
+}
+
+function onPointerMove(e) {
+    if (!drag) return;
+
+    if (!drag.active) {
+        if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > DRAG_THRESHOLD) {
+            startDrag();
+        } else {
+            return;
+        }
+    }
+
+    moveGhost(e.clientX, e.clientY);
+    setDropTarget(currentDropCol(e.clientX, e.clientY));
+    autoScroll(e.clientX, e.clientY);
+}
+
+function onPointerUp() {
+    if (!drag) return;
+
+    const wasActive = drag.active;
+    const targetCol = drag.curCol;
+    const canDrop = drag.canDrop;
+    const reason = drag.denyReason;
+    const d = drag;
+
+    if (!wasActive) {
+        const id = d.id;
+        cleanupDrag();
+        openDrawer(id);
+        return;
+    }
+
+    if (targetCol && canDrop) {
+        const totalAbove = d.groupIds.reduce((s, id) => s + removedAboveFor(id), 0);
+        const extra = totalAbove > 0
+            ? ` · снято ${totalAbove} ярус${totalAbove > 1 && totalAbove < 5 ? "а" : totalAbove >= 5 ? "ов" : ""} сверху`
+            : "";
+
+        const src = DATA.find(x => x.id === d.id);
+        const label = d.group
+            ? `${d.groupIds.length} ярусов → ${targetCol.dataset.block}/${pad2(+targetCol.dataset.bay)}`
+            : `${src.number} → ${targetCol.dataset.block}/${pad2(+targetCol.dataset.bay)}`;
+
+        performMove(d.groupIds.slice(), targetCol.dataset.block, +targetCol.dataset.bay, label);
+
+        if (d.group) clearSelection();
+
+        toast((d.group ? `Переставлено ${d.groupIds.length} ярусов` : `Переставлен ${src.prefix} ${src.number}`) + `: ${label}${extra}`);
+
+        cleanupDrag();
+        updateStackHighlights();
+        syncBulkUI();
+    } else {
+        cleanupDrag();
+
+        if (targetCol && !canDrop) {
+            toast("Перестановка запрещена: " + reason, true);
+        }
+    }
+}
+
+function cleanupDrag() {
+    if (!drag) return;
+
+    if (drag.ghost) drag.ghost.remove();
+
+    document.body.classList.remove("dragging-active");
+
+    clearDropTarget();
+
+    yard.querySelectorAll(".tier.dragging,.tier.lifted").forEach(t => {
+        t.classList.remove("dragging", "lifted");
+    });
+
+    drag = null;
+}
+
+/* ============================================================
+   MARQUEE ВЫДЕЛЕНИЕ
+============================================================ */
+
+let marquee = null;
+
+function overlap(a, b) {
+    return !(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top);
+}
+
+function onMarqueePointerDown(e) {
+    if (view !== "stacks" || e.button !== 0) return;
+    if (e.target.closest(".tier")) return;
+    if ($("#drawer").classList.contains("open")) return;
+    if (e.target.closest(".yard-bar") || e.target.closest(".undo-rail") || e.target.closest(".yard-legend")) return;
+
+    marquee = {
+        startX: e.clientX,
+        startY: e.clientY,
+        active: false,
+        el: null,
+        curSel: new Set(),
+        byBlock: new Map(),
+        raf: 0
+    };
+
+    e.preventDefault();
+}
+
+function buildMarqueeIndex() {
+    const byBlock = new Map();
+
+    yard.querySelectorAll(".stack-block").forEach(bl => {
+        const name = bl.dataset.block;
+        const arr = [];
+
+        bl.querySelectorAll(".tier").forEach(t => {
+            arr.push({ el: t, id: +t.dataset.id });
+        });
+
+        byBlock.set(name, { el: bl, tiers: arr });
+    });
+
+    marquee.byBlock = byBlock;
+}
+
+function startMarquee() {
+    const m = marquee;
+    m.active = true;
+
+    buildMarqueeIndex();
+
+    const el = document.createElement("div");
+    el.className = "marquee";
+    document.body.appendChild(el);
+    m.el = el;
+
+    yard.querySelectorAll(".tier.msel").forEach(t => t.classList.remove("msel"));
+
+    selectedIds.clear();
+    syncBulkUI();
+
+    paintMarquee(m.startX, m.startY);
+}
+
+function paintMarquee(x, y) {
+    const m = marquee;
+
+    const l = Math.min(m.startX, x);
+    const t = Math.min(m.startY, y);
+    const r = Math.max(m.startX, x);
+    const b = Math.max(m.startY, y);
+
+    m.el.style.left = l + "px";
+    m.el.style.top = t + "px";
+    m.el.style.width = (r - l) + "px";
+    m.el.style.height = (b - t) + "px";
+
+    const mrect = { left: l, top: t, right: r, bottom: b };
+    const newSel = new Set();
+
+    m.byBlock.forEach(info => {
+        const br = info.el.getBoundingClientRect();
+        if (!overlap(br, mrect)) return;
+
+        info.tiers.forEach(o => {
+            const tr = o.el.getBoundingClientRect();
+            if (overlap(tr, mrect)) newSel.add(o.id);
+        });
+    });
+
+    newSel.forEach(id => {
+        if (!m.curSel.has(id)) {
+            const o = findTierEl(m, id);
+            if (o) o.el.classList.add("marquee-sel");
+        }
+    });
+
+    m.curSel.forEach(id => {
+        if (!newSel.has(id)) {
+            const o = findTierEl(m, id);
+            if (o) o.el.classList.remove("marquee-sel");
+        }
+    });
+
+    m.curSel = newSel;
+}
+
+function findTierEl(m, id) {
+    for (const info of m.byBlock.values()) {
+        const o = info.tiers.find(t => t.id === id);
+        if (o) return o;
+    }
+
+    return null;
+}
+
+function marqueeAutoScroll(y) {
+    const yr = yard.getBoundingClientRect();
+
+    if (y < yr.top + 44) yard.scrollTop -= 12;
+    else if (y > yr.bottom - 30) yard.scrollTop += 12;
+}
+
+function onMarqueeMove(e) {
+    if (!marquee) return;
+
+    if (!marquee.active) {
+        if (Math.abs(e.clientX - marquee.startX) + Math.abs(e.clientY - marquee.startY) > DRAG_THRESHOLD) {
+            startMarquee();
+        } else {
+            return;
+        }
+    }
+
+    marqueeAutoScroll(e.clientY);
+
+    if (!marquee.raf) {
+        const x = e.clientX;
+        const y = e.clientY;
+
+        marquee.raf = requestAnimationFrame(() => {
+            marquee.raf = 0;
+            paintMarquee(x, y);
+        });
+    }
+}
+
+function onMarqueeUp() {
+    if (!marquee) return;
+
+    const wasActive = marquee.active;
+    const sel = marquee.curSel;
+
+    if (marquee.el) marquee.el.remove();
+
+    if (marquee.raf) {
+        cancelAnimationFrame(marquee.raf);
+        marquee.raf = 0;
+    }
+
+    marquee = null;
+
+    if (!wasActive) {
+        clearSelection();
+        return;
+    }
+
+    yard.querySelectorAll(".tier.marquee-sel").forEach(t => {
+        t.classList.remove("marquee-sel");
+        t.classList.add("msel");
+    });
+
+    sel.forEach(id => selectedIds.add(id));
+
+    syncBulkUI();
+}
+
+yard.addEventListener("pointerdown", onTierPointerDown);
+yard.addEventListener("pointerdown", onMarqueePointerDown);
+
+window.addEventListener("pointermove", e => {
+    onPointerMove(e);
+    onMarqueeMove(e);
+});
+
+window.addEventListener("pointerup", () => {
+    onPointerUp();
+    onMarqueeUp();
+});
+
+window.addEventListener("pointercancel", () => {
+    if (drag && drag.active) cleanupDrag();
+
+    if (marquee) {
+        if (marquee.el) marquee.el.remove();
+        marquee = null;
+    }
+});
+
+/* ============================================================
+   КАРТОЧКА КОНТЕЙНЕРА
+============================================================ */
+
+function markSel(id) {
+    yard.querySelectorAll(".sel").forEach(e => e.classList.remove("sel"));
+
+    if (id != null) {
+        const el = yard.querySelector('[data-id="' + id + '"]');
+        if (el) el.classList.add("sel");
+    }
+}
+
+function setRole(r) {
+    role = r;
+
+    document.body.classList.toggle("role-reader", r === "reader");
+
+    $("#roleOpts").querySelectorAll("button").forEach(b => {
+        b.classList.toggle("on", b.dataset.role === r);
+    });
+
+    $("#roleWho").textContent = CURRENT_USER;
+
+    applyRoleToDrawer();
+    syncBulkUI();
+}
+
+function applyRoleToDrawer() {
+    document.querySelectorAll("#drawer [data-w]").forEach(el => {
+        el.disabled = !canWrite();
+    });
+
+    document.querySelectorAll("#drawer [data-admin]").forEach(el => {
+        el.disabled = !canAdmin();
+    });
+
+    $("#tgl-ret").classList.toggle("locked", !canAdmin());
+    $("#tgl-kgmk").classList.toggle("locked", !canWrite());
+    $("#docAdd").disabled = !canWrite();
+}
+
+function fillSelect(el, items, cur) {
+    if (!el) return;
+
+    el.innerHTML = items.map(t => `<option ${t === cur ? "selected" : ""}>${t}</option>`).join("");
+}
+
+function setTab(tab) {
+    drawerTab = tab;
+
+    $("#drTabs").querySelectorAll("button").forEach(b => {
+        b.classList.toggle("on", b.dataset.tab === tab);
+    });
+
+    document.querySelectorAll(".tab-pane").forEach(p => {
+        p.classList.toggle("on", p.dataset.pane === tab);
+    });
+
+    if (tab === "chain") renderChain();
+    if (tab === "docs") renderDocs();
+    if (tab === "log") renderLog();
+    if (tab === "moves") $("#f-moves").innerHTML = renderMoves(editing ? editing.moveLog : []);
+}
+
+function renderMoves(log) {
+    if (!log || !log.length) {
+        return `<div class="mv-empty">Перемещений не зафиксировано</div>`;
+    }
+
+    return log.slice().sort((a, b) => b.at - a.at).map(m =>
+        `<div class="mv">
+            <span class="mv-time">${fmtDate(m.at)}</span>
+            <span class="mv-route">
+                ${m.from.block}/${pad2(m.from.bay)}/T${m.from.tier}
+                <span class="arr">→</span>
+                ${m.to.block}/${pad2(m.to.bay)}/T${m.to.tier}
+            </span>
+        </div>`
+    ).join("");
+}
+
+const CHAIN = [
+    { label: "Взвешивание порожнего контейнера", who: "ТЦ", sm: d => d.tareFact != null ? `тара ${fmt(d.tareFact)} кг` : "масса порожнего не внесена", done: d => d.tareFact != null },
+    { label: "Загрузка продукции + взвешивание гружёного", who: "ВСП / ЦМТО", sm: d => d.gross != null ? `брутто ${fmt(d.gross)} кг` : "продукция не загружена", done: d => d.gross != null },
+    { label: "Акт взвешивания", who: "ЦМТО → ОТК", sm: d => hasDoc(d, "weighing") ? "документ оформлен" : "ожидает оформления", done: d => hasDoc(d, "weighing") },
+    { label: "Хранение / отправка в технологический поток", who: "ЦМТО", sm: d => (d.procState === "storage" || d.procState === "shipment") ? procName(d.procState) : "не определено", done: d => d.procState === "storage" || d.procState === "shipment" },
+    { label: "Повторное взвешивание гружёного", who: "ЦМТО", sm: d => d.grossRepeat != null ? `брутто повторное ${fmt(d.grossRepeat)} кг` : "не выполнялось", done: d => d.grossRepeat != null },
+    { label: "Акт перевески", who: "ЦМТО → ОТК", sm: d => hasDoc(d, "reweigh") ? "документ оформлен" : "не требуется / ожидает", done: d => hasDoc(d, "reweigh") },
+    { label: "Документы о качестве", who: "ОТК", sm: d => hasDoc(d, "quality") ? "оформлены" : "ожидают оформления", done: d => hasDoc(d, "quality") },
+    { label: "Отгрузочные документы", who: "ТЦ", sm: d => hasDoc(d, "shipping") ? "оформлены" : "ожидают оформления", done: d => hasDoc(d, "shipping") },
+    { label: "Отгрузка", who: "ТЦ", sm: d => d.procState === "shipment" ? "отгружен" : "не отгружен", done: d => d.procState === "shipment" }
+];
+
+function renderChain() {
+    if (!editing) {
+        $("#chainList").innerHTML = "";
+        return;
+    }
+
+    let firstActive = true;
+
+    $("#chainList").innerHTML = CHAIN.map((c, i) => {
+        const done = c.done(editing);
+        const active = !done && firstActive;
+
+        if (active) firstActive = false;
+
+        const cls = done ? "done" : (active ? "active" : "wait");
+
+        return `<div class="step ${cls}" style="animation-delay:${i * 45}ms">
+            <div class="rail">
+                <div class="node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></div>
+                <div class="line"></div>
+            </div>
+            <div class="body">
+                <div class="st">${c.label}<span class="who">${c.who}</span></div>
+                <div class="sm">${c.sm(editing)}</div>
+            </div>
+        </div>`;
+    }).join("");
+}
+
+function renderDocs() {
+    if (!editing) {
+        $("#docsList").innerHTML = "";
+        $("#docs-count").textContent = "";
+        return;
+    }
+
+    editing.docs = editing.docs || [];
+
+    $("#docs-count").textContent = `Привязано документов: ${editing.docs.length}`;
+
+    $("#docsList").innerHTML = editing.docs.length ? editing.docs.map((doc, i) => {
+        const ic = CARRIER_ICON[doc.carrier] || CARRIER_ICON.paper;
+
+        return `<div class="doc" data-i="${i}">
+            <div class="d-top">
+                <span class="d-type">${DOC_TYPES[doc.type] || doc.type}</span>
+                <button class="d-del" data-del="${i}" title="Удалить документ" ${canWrite() ? "" : "disabled"}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                </button>
+            </div>
+            <div class="d-grid">
+                <div class="dg">
+                    <label>Номер / идентификатор</label>
+                    <input data-docnum="${i}" value="${doc.num || ""}" ${canWrite() ? "" : "disabled"}>
+                </div>
+                <div class="dg">
+                    <label>Дата документа</label>
+                    <input type="date" data-docdate="${i}" value="${doc.date ? new Date(doc.date).toISOString().slice(0, 10) : ""}" ${canWrite() ? "" : "disabled"}>
+                </div>
+                <div class="dg">
+                    <label>Тип документа</label>
+                    <select data-doctype="${i}" ${canWrite() ? "" : "disabled"}>
+                        ${Object.entries(DOC_TYPES).map(([k, v]) => `<option value="${k}" ${k === doc.type ? "selected" : ""}>${v}</option>`).join("")}
+                    </select>
+                </div>
+                <div class="dg">
+                    <label>Носитель</label>
+                    <select data-doccarrier="${i}" ${canWrite() ? "" : "disabled"}>
+                        ${Object.entries(DOC_CARRIERS).map(([k, v]) => `<option value="${k}" ${k === doc.carrier ? "selected" : ""}>${v}</option>`).join("")}
+                    </select>
+                </div>
+            </div>
+            <span class="carrier-tag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${ic}"/></svg>
+                ${DOC_CARRIERS[doc.carrier] || "—"}
+            </span>
+        </div>`;
+    }).join("") : `<div class="log-empty">Документы не привязаны.</div>`;
+
+    $("#docsList").querySelectorAll("[data-docnum]").forEach(inp => {
+        inp.oninput = e => {
+            editing.docs[+e.target.dataset.docnum].num = e.target.value;
+        };
+    });
+
+    $("#docsList").querySelectorAll("[data-docdate]").forEach(inp => {
+        inp.onchange = e => {
+            const v = e.target.value;
+            editing.docs[+e.target.dataset.docdate].date = v ? new Date(v).getTime() : null;
+        };
+    });
+
+    $("#docsList").querySelectorAll("[data-doctype]").forEach(sel => {
+        sel.onchange = e => {
+            editing.docs[+e.target.dataset.doctype].type = e.target.value;
+            renderDocs();
+        };
+    });
+
+    $("#docsList").querySelectorAll("[data-doccarrier]").forEach(sel => {
+        sel.onchange = e => {
+            editing.docs[+e.target.dataset.doccarrier].carrier = e.target.value;
+            renderDocs();
+        };
+    });
+
+    $("#docsList").querySelectorAll("[data-del]").forEach(b => {
+        b.onclick = e => {
+            if (!canWrite()) return;
+
+            editing.docs.splice(+e.target.closest("[data-del]").dataset.del, 1);
+            renderDocs();
+        };
+    });
+}
+
+function addDoc() {
+    if (!canWrite() || !editing) return;
+
+    editing.docs = editing.docs || [];
+    editing.docs.push({
+        type: "weighing",
+        num: `WEIGH-${rndInt(1000, 9999)}/2026`,
+        date: Date.now(),
+        carrier: DOC_DEF_CARRIER.weighing
+    });
+
+    renderDocs();
+}
+
+function renderLog() {
+    if (!editing) {
+        $("#logList").innerHTML = "";
+        $("#logMeta").innerHTML = "";
+        return;
+    }
+
+    $("#logMeta").innerHTML = `<span>Создано: <b>${fmtDate(editing.createdAt)}</b></span>
+        <span>Последнее изменение: <b>${fmtDate(editing.updatedAt)}</b></span>
+        <span class="ret">Хранение записей — не менее 5 лет</span>`;
+
+    const log = (editing.changeLog || []).slice().sort((a, b) => b.at - a.at);
+
+    $("#logList").innerHTML = log.length ? log.map(l => {
+        const lbl = FIELD_LABELS[l.field] || l.field;
+
+        return `<div class="le">
+            <div class="lt"><span>${fmtDate(l.at)}</span><span class="u">${l.user}</span></div>
+            <div class="ld"><span class="fld">${lbl}</span>: <span class="from">${l.from || "—"}</span> → <span class="to">${l.to || "—"}</span></div>
+        </div>`;
+    }).join("") : `<div class="log-empty">Изменений полей не зафиксировано.</div>`;
+}
+
+function updateMassInfo() {
+    const pw = +$("#f-pw").value || 0;
+    const tare = $("#f-tare").value === "" ? null : +$("#f-tare").value;
+    const gross = $("#f-gross").value === "" ? null : +$("#f-gross").value;
+
+    const nEl = $("#f-netto");
+
+    if (gross != null && tare != null) {
+        const net = gross - tare;
+        nEl.classList.remove("emp");
+        nEl.querySelector(".nv").textContent = fmt(net) + " кг";
+    } else {
+        nEl.classList.add("emp");
+        nEl.querySelector(".nv").textContent = "—";
+    }
+
+    const w = $("#w-info");
+
+    if (pw > 0 && tare != null) {
+        const diff = tare - pw;
+        const pct = Math.round(diff / pw * 100);
+
+        $("#w-info-txt").textContent = `Расхождение трафарет ↔ тара факт.: ${diff >= 0 ? "+" : ""}${fmt(diff)} кг (${pct >= 0 ? "+" : ""}${pct}%).`;
+        w.classList.add("show");
+    } else {
+        w.classList.remove("show");
+    }
+}
+
+async function openDrawer(id) {
+    let d = DATA.find(x => x.id === id);
+    if (!d) return;
+
+    // Если запись временная — не дергаем API.
+    if (dataSource === "db" && id > 0 && !d.isNew) {
+        try {
+            const res = await fetch(`${API_BASE}/containers/${id}`);
+            if (res.ok) {
+                const full = mapDto(await res.json());
+                const idx = DATA.findIndex(x => x.id === id);
+                if (idx >= 0) {
+                    DATA[idx] = { ...DATA[idx], ...full };
+                    d = DATA[idx];
+                }
+            }
+        } catch (e) {
+            console.warn("Не удалось догрузить полную карточку", e);
+        }
+    }
+
+    clearSelection();
+
+    selectedId = id;
+    editing = JSON.parse(JSON.stringify(d));
+    editingOld = JSON.parse(JSON.stringify(d));
+
+    markSel(id);
+
+    const s = stateOf(editing.state);
+
+    $("#drawer").style.setProperty("--c", s.hex);
+    $("#d-pre").textContent = editing.prefix || "----";
+    $("#d-num").textContent = String(editing.number || "").slice(0, 6) || "000000";
+    $("#d-iso").textContent = editing.iso || "—";
+
+    $("#f-type").value = editing.typeLegacy || "";
+    $("#f-iso").value = editing.iso || "";
+
+    const cc = computedCheck(editing);
+    const chkEl = $("#d-chk");
+    const shown = editing.number ? String(editing.number)[6] : undefined;
+
+    chkEl.textContent = shown ?? "–";
+    chkEl.classList.toggle("bad", shown !== undefined && +shown !== cc);
+
+    $("#d-st-dot").style.background = s.color;
+    $("#d-st-name").textContent = s.name;
+
+    const prw = $("#d-prc-wrap");
+    const p = procOf(editing.procState);
+
+    if (p) {
+        prw.classList.remove("none");
+        $("#d-prc-dot").style.display = "";
+        $("#d-prc-dot").style.background = p.color;
+        $("#d-prc-name").textContent = p.name;
+        $("#d-prc-name").style.color = p.hex;
+    } else {
+        prw.classList.add("none");
+        $("#d-prc-dot").style.display = "none";
+        $("#d-prc-name").textContent = "не в операции";
+        $("#d-prc-name").style.color = "";
+    }
+
+    const loc = $("#d-loc");
+
+    if (editing.block) {
+        loc.style.display = "";
+        loc.textContent = `секция ${editing.block} · ряд ${pad2(editing.bay)} · ярус ${editing.tier}`;
+    } else {
+        loc.style.display = "none";
+    }
+
+    $("#f-pre").value = editing.prefix || "";
+    $("#f-num").value = editing.number || "";
+    $("#f-pw").value = editing.pw ?? "";
+    $("#f-tare").value = editing.tareFact == null ? "" : editing.tareFact;
+    $("#f-gross").value = editing.gross == null ? "" : editing.gross;
+    $("#f-grep").value = editing.grossRepeat == null ? "" : editing.grossRepeat;
+
+    fillSelect($("#f-state"), Object.values(STATES).map(s => s.name), s.name);
+    fillSelect($("#f-proc"), ["— не в операции —", ...Object.values(PROC).map(p => p.name)], editing.procState ? procName(editing.procState) : "— не в операции —");
+
+    const ownerOpts = OWNERS.length ? OWNERS.map(o => o.fullName) : ["Не назначен"];
+    fillSelect($("#f-owner"), ownerOpts.concat(["Не назначен"]), editing.owner);
+
+    $("#f-kgmk").checked = !!editing.kgmk;
+    $("#f-ret").checked = !!editing.retired;
+    $("#f-note").value = editing.note || "";
+
+    applyRoleToDrawer();
+    updateMassInfo();
+    setTab("data");
+
+    $("#drawer").classList.add("open");
+    $("#scrim").classList.add("open");
+    $("#drawer").setAttribute("aria-hidden", "false");
+}
+
+function closeDrawer() {
+    $("#drawer").classList.remove("open");
+    $("#scrim").classList.remove("open");
+    $("#drawer").setAttribute("aria-hidden", "true");
+
+    selectedId = null;
+    markSel(null);
+
+    editing = null;
+    editingOld = null;
+}
+
+function valFromForm() {
+    const procSel = $("#f-proc").value;
+    const procKey = Object.keys(PROC).find(k => PROC[k].name === procSel) || "";
+
+    const stSel = $("#f-state").value;
+    const stKey = Object.keys(STATES).find(k => STATES[k].name === stSel) || "inuse";
+
+    return {
+        prefix: ($("#f-pre").value || "").toUpperCase().trim(),
+        number: ($("#f-num").value || "").replace(/\D/g, "").trim(),
+
+        typeLegacy: ($("#f-type").value || "").trim(),
+        iso: ($("#f-iso").value || "").toUpperCase().trim(),
+
+        pw: $("#f-pw").value === "" ? null : +$("#f-pw").value,
+        tareFact: $("#f-tare").value === "" ? null : +$("#f-tare").value,
+        gross: $("#f-gross").value === "" ? null : +$("#f-gross").value,
+        grossRepeat: $("#f-grep").value === "" ? null : +$("#f-grep").value,
+
+        state: stKey,
+        procState: procKey,
+        owner: $("#f-owner").value || "Не назначен",
+        kgmk: $("#f-kgmk").checked,
+        retired: $("#f-ret").checked,
+        note: $("#f-note").value
+    };
+}
+
+function liveHeader() {
+    const pre = ($("#f-pre").value || "").toUpperCase().slice(0, 4);
+    const num = ($("#f-num").value || "").replace(/\D/g, "").slice(0, 7);
+
+    $("#d-pre").textContent = pre || "----";
+    $("#d-num").textContent = (num || "000000").slice(0, 6);
+    $("#d-iso").textContent = ($("#f-iso").value || "").toUpperCase() || "—";
+
+    const chkEl = $("#d-chk");
+
+    if (pre.length === 4 && num.length >= 6) {
+        const c = checkDigit(pre, num.slice(0, 6));
+        const shown = num[6];
+
+        chkEl.textContent = shown ?? "–";
+        chkEl.classList.toggle("bad", shown !== undefined && +shown !== c);
+    } else {
+        chkEl.textContent = "–";
+        chkEl.classList.remove("bad");
+    }
+
+    const sKey = Object.keys(STATES).find(k => STATES[k].name === $("#f-state").value);
+
+    if (sKey) {
+        $("#d-st-dot").style.background = STATES[sKey].color;
+        $("#d-st-name").textContent = STATES[sKey].name;
+        $("#drawer").style.setProperty("--c", STATES[sKey].hex);
+    }
+
+    const procKey = Object.keys(PROC).find(k => PROC[k].name === $("#f-proc").value);
+    const prw = $("#d-prc-wrap");
+
+    if (procKey) {
+        prw.classList.remove("none");
+        $("#d-prc-dot").style.display = "";
+        $("#d-prc-dot").style.background = PROC[procKey].color;
+        $("#d-prc-name").textContent = PROC[procKey].name;
+        $("#d-prc-name").style.color = PROC[procKey].hex;
+    } else {
+        prw.classList.add("none");
+        $("#d-prc-dot").style.display = "none";
+        $("#d-prc-name").textContent = "не в операции";
+        $("#d-prc-name").style.color = "";
+    }
+}
+
+async function saveDrawer() {
+    if (!canWrite()) {
+        toast("Недостаточно прав для записи", true);
+        return;
+    }
+
+    if (!editing) return;
+
+    const v = valFromForm();
+
+    const diff = [];
+
+    Object.keys(FIELD_LABELS).forEach(f => {
+        const oldV = editingOld[f];
+        const newV = v[f];
+
+        const os = f === "kgmk" || f === "retired"
+            ? (oldV ? "Да" : "Нет")
+            : f === "procState"
+                ? (procName(oldV) || "—")
+                : (oldV == null ? "—" : oldV);
+
+        const ns = f === "kgmk" || f === "retired"
+            ? (newV ? "Да" : "Нет")
+            : f === "procState"
+                ? (procName(newV) || "—")
+                : (newV == null ? "—" : newV);
+
+        if (String(os) !== String(ns)) {
+            diff.push({
+                at: Date.now(),
+                user: CURRENT_USER,
+                field: f,
+                from: String(os),
+                to: String(ns)
+            });
+        }
+    });
+
+    const docsChanged =
+        JSON.stringify((editingOld.docs || []).map(d => [d.type, d.num, d.carrier, d.date])) !==
+        JSON.stringify((editing.docs || []).map(d => [d.type, d.num, d.carrier, d.date]));
+
+    Object.assign(editing, v);
+    editing.updatedAt = Date.now();
+
+    if (diff.length || docsChanged) {
+        editing.changeLog = editing.changeLog || [];
+        diff.forEach(x => editing.changeLog.push(x));
+
+        if (docsChanged) {
+            editing.changeLog.push({
+                at: Date.now(),
+                user: CURRENT_USER,
+                field: "docs",
+                from: "—",
+                to: `документов: ${(editing.docs || []).length}`
+            });
+        }
+    }
+
+    if (dataSource !== "db") {
+        const idx = DATA.findIndex(d => d.id === editing.id);
+
+        if (idx >= 0) DATA[idx] = JSON.parse(JSON.stringify(editing));
+        else DATA.push(JSON.parse(JSON.stringify(editing)));
+
+        LAYOUT = buildLayoutFromData(DATA);
+
+        toast("Сохранено локально");
+        closeDrawer();
+        buildFacets();
+        render(true);
+        return;
+    }
+
+    try {
+        const foundType = (window.CONTAINER_TYPES || []).find(t => t.caption === editing.typeLegacy);
+
+        const payload = {
+            numContainer: parseInt(editing.number, 10) || 0,
+            prefix: editing.prefix,
+
+            typeId: foundType ? foundType.id : null,
+            typeCaption: editing.typeLegacy || "",
+            isoCode: editing.iso || "",
+
+            state: editing.state,
+            procState: editing.procState,
+
+            tareStencilKg: editing.pw,
+            tareFactKg: editing.tareFact,
+            grossKg: editing.gross,
+            grossRepeatKg: editing.grossRepeat,
+
+            isKgmk: editing.kgmk,
+            isRetired: editing.retired,
+
+            notes: editing.note,
+
+            block: editing.block,
+            bay: editing.bay,
+            tier: editing.tier,
+
+            responsible: editing.owner,
+
+            docs: (editing.docs || []).map(d => ({
+                type: d.type,
+                num: d.num,
+                date: d.date ? new Date(d.date).toISOString() : null,
+                carrier: d.carrier
+            }))
+        };
+
+        const isNew = !!editing.isNew;
+
+        const url = isNew
+            ? `${API_BASE}/containers`
+            : `${API_BASE}/containers/${editing.id}`;
+
+        const method = isNew ? "POST" : "PUT";
+
+        const res = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(text || "Ошибка сохранения");
+        }
+
+        const savedDto = await res.json();
+        const saved = mapDto(savedDto);
+
+        const oldId = editing.id;
+        const localIdx = DATA.findIndex(d => d.id === oldId);
+
+        if (localIdx >= 0) DATA[localIdx] = saved;
+        else DATA.push(saved);
+
+        LAYOUT = buildLayoutFromData(DATA);
+        pagination.totalElements = DATA.length;
+
+        toast(isNew ? "Контейнер создан" : "Сохранено в БД");
+
+        closeDrawer();
+        buildFacets();
+        render(true);
+
+    } catch (e) {
+        console.error(e);
+        toast("Ошибка сохранения в БД: " + e.message, true);
+    }
+}
+
+/* ============================================================
+   TOAST / BULK
+============================================================ */
+
+let toastT;
+
+function toast(t, warn) {
+    $("#toast-txt").textContent = t;
+    $("#toast").classList.toggle("warn", !!warn);
+    $("#toast").classList.add("show");
+
+    clearTimeout(toastT);
+
+    toastT = setTimeout(() => {
+        $("#toast").classList.remove("show");
+    }, warn ? 5500 : 3200);
+}
+
+async function bulkApply() {
+    if (!canWrite()) {
+        toast("Недостаточно прав для записи", true);
+        return;
+    }
+
+    if (!selectedIds.size) return;
+
+    const st = $("#bb-state").value;
+    const pr = $("#bb-proc").value;
+    const ow = $("#bb-owner").value;
+    const kg = $("#bb-kgmk").value;
+
+    if (!st && !pr && !ow && kg === "") {
+        toast("Выберите хотя бы одно изменение", true);
+        return;
+    }
+
+    const idsToUpdate = Array.from(selectedIds);
+    let successCount = 0;
+
+    idsToUpdate.forEach(id => {
+        const d = DATA.find(x => x.id === id);
+        if (!d) return;
+
+        if (st) d.state = st;
+        if (pr) d.procState = pr === "__none" ? "" : pr;
+        if (ow) d.owner = ow;
+        if (kg !== "") d.kgmk = kg === "1";
+    });
+
+    buildFacets();
+    clearSelection();
+    render(false);
+
+    toast(`Обновление ${idsToUpdate.length} контейнеров...`);
+
+    if (dataSource === "db") {
+        try {
+            const promises = idsToUpdate.map(id => {
+                const d = DATA.find(x => x.id === id);
+                if (!d) return Promise.resolve();
+
+                const payload = {
+                    state: d.state,
+                    procState: d.procState,
+                    responsible: d.owner,
+                    isKgmk: d.kgmk
+                };
+
+                return fetch(`${API_BASE}/containers/${id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                }).then(res => {
+                    if (res.ok) successCount++;
+                    else throw new Error(`Failed for ${id}`);
+                });
+            });
+
+            await Promise.all(promises);
+
+            toast(`Успешно обновлено: ${successCount}`);
+
+            buildFacets();
+            render(false);
+
+        } catch (e) {
+            console.error(e);
+            toast("Ошибка при сохранении части контейнеров", true);
+        }
+    } else {
+        toast(`Обновлено (демо): ${idsToUpdate.length}`);
+    }
+
+    ["#bb-state", "#bb-proc", "#bb-owner", "#bb-kgmk"].forEach(s => {
+        $(s).value = "";
+        $(s).classList.remove("touched");
+    });
+}
+
+/* ============================================================
+   ПЛАН
+============================================================ */
+
+async function enterPlan() {
+    if (planMode || !canWrite()) return;
+
+    factData = JSON.parse(JSON.stringify(DATA));
+
+    try {
+        const res = await fetch(`${API_BASE}/containers/plans`);
+
+        if (res.ok) {
+            const plans = await res.json();
+
+            PLAN_DATA.clear();
+
+            plans.forEach(p => {
+                PLAN_DATA.set(p.id, { block: p.block, bay: p.bay, tier: p.tier });
+
+                const container = DATA.find(d => d.id === p.id);
+
+                if (container) {
+                    container.block = p.block;
+                    container.bay = p.bay;
+                    container.tier = p.tier;
+                }
+            });
+        }
+    } catch (e) {
+        console.warn("Ошибка загрузки планов, начинаем с факта", e);
+    }
+
+    LAYOUT = buildLayoutFromData(DATA);
+
+    planUndo.length = 0;
+    planRedo.length = 0;
+    planMode = true;
+
+    yardWrap.classList.add("plan-mode");
+    yard.classList.add("plan-mode");
+
+    const btn = $("#planBtn");
+    btn.classList.add("plan-on");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg>Применить план`;
+    btn.title = "Применить план к факту";
+
+    const cancelBtn = $("#cancelPlanBtn");
+    if (cancelBtn) cancelBtn.style.display = "inline-flex";
+
+    toast("Режим плана активен");
+    render(false);
+}
+
+async function applyPlan() {
+    if (!planMode) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/containers/plans/apply`, { method: "POST" });
+        if (!res.ok) throw new Error("Failed to apply");
+
+        planMode = false;
+        PLAN_DATA.clear();
+
+        yardWrap.classList.remove("plan-mode");
+        yard.classList.remove("plan-mode");
+
+        const btn = $("#planBtn");
+        btn.classList.remove("plan-on");
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19"/><circle cx="12" cy="12" r="3.2"/></svg>План`;
+
+        const cancelBtn = $("#cancelPlanBtn");
+        if (cancelBtn) cancelBtn.style.display = "none";
+
+        toast("План применён. Перезагрузка данных...");
+
+        await loadData();
+        render(true);
+
+    } catch (e) {
+        console.error(e);
+        toast("Ошибка применения плана", true);
+    }
+}
+
+function cancelPlan() {
+    if (!planMode) return;
+
+    DATA = JSON.parse(JSON.stringify(factData));
+    LAYOUT = buildLayoutFromData(DATA);
+
+    planMode = false;
+    PLAN_DATA.clear();
+
+    yardWrap.classList.remove("plan-mode");
+    yard.classList.remove("plan-mode");
+
+    const btn = $("#planBtn");
+    btn.classList.remove("plan-on");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19"/><circle cx="12" cy="12" r="3.2"/></svg>План`;
+
+    const cancelBtn = $("#cancelPlanBtn");
+    if (cancelBtn) cancelBtn.style.display = "none";
+
+    toast("План отменён. Возврат к факту.");
+    render(false);
+}
+
+/* ============================================================
+   АНАЛИТИКА
+============================================================ */
+
+function openAnalytics() {
+    renderAnalytics();
+
+    $("#analytics").classList.add("open");
+    $("#analytics").setAttribute("aria-hidden", "false");
+    $("#axScrim").classList.add("open");
+    $("#analytics").classList.toggle("in-plan", planMode);
+}
+
+function closeAnalytics() {
+    $("#analytics").classList.remove("open");
+    $("#analytics").setAttribute("aria-hidden", "true");
+    $("#axScrim").classList.remove("open");
+}
+
+function heatColor(p) {
+    const h = 120 - (Math.min(1, p) * 120);
+    return `hsl(${h} 62% 42%)`;
+}
+
+function renderAnalytics() {
+    const blocks = groupBlocks();
+    const blockNames = [...blocks.keys()].sort((a, b) => a.localeCompare(b));
+
+    const heat = blockNames.map(name => {
+        const bays = blocks.get(name) || new Map();
+        let total = 0;
+        let prob = 0;
+
+        bays.forEach(arr => arr.forEach(d => {
+            total++;
+            if (isProblem(d)) prob++;
+        }));
+
+        const p = total ? prob / total : 0;
+
+        return { name, total, prob, p };
+    });
+
+    $("#ax-heat-q").textContent = `проблемных ярусов · всего ${fmt(DATA.length)}`;
+
+    $("#ax-heat-list").innerHTML = heat.map(h => {
+        const pct = Math.round(h.p * 100);
+
+        return `<div class="heat-row" data-block="${h.name}">
+            <span class="hb">${h.name}</span>
+            <div class="hbar"><i style="background:${heatColor(h.p)}" data-w="${pct}"></i></div>
+            <span class="hpct">${h.prob}/${h.total}</span>
+        </div>`;
+    }).join("");
+
+    requestAnimationFrame(() => {
+        $("#ax-heat-list").querySelectorAll(".hbar i").forEach(i => {
+            i.style.width = Math.max(3, +i.dataset.w) + "%";
+        });
+    });
+
+    $("#ax-heat-list").querySelectorAll(".heat-row").forEach(r => {
+        r.onclick = () => {
+            closeAnalytics();
+            aimBlock(r.dataset.block);
+        };
+    });
+
+    const bn = [];
+
+    blocks.forEach(bays => bays.forEach(arr => {
+        const maxT = arr.length ? Math.max(...arr.map(d => d.tier)) : 0;
+
+        arr.forEach(d => {
+            if (isProblem(d)) {
+                const buried = maxT - d.tier;
+                bn.push({
+                    d,
+                    buried,
+                    score: buried + (d.state === "damaged" ? 2 : 1)
+                });
+            }
+        });
+    }));
+
+    bn.sort((a, b) => b.score - a.score);
+
+    const top = bn.slice(0, 12);
+
+    $("#ax-bn-q").textContent = bn.length ? `${bn.length} шт.` : "нет";
+
+    $("#ax-bn-list").innerHTML = top.length ? top.map(o => {
+        const s = stateOf(o.d.state);
+
+        return `<div class="bn">
+            <span class="sw" style="background:${s.color}"></span>
+            <span class="bn-id">${o.d.prefix} ${o.d.number} · ${o.d.block}/${pad2(o.d.bay)}/T${o.d.tier}</span>
+            <span class="bn-cost">снять ${o.buried}</span>
+        </div>`;
+    }).join("") : `<div class="ax-empty">Проблемных ярусов под завалом нет.</div>`;
+
+    const buckets = [0, 0, 0, 0];
+    let stacks = 0;
+
+    blocks.forEach(bays => bays.forEach(arr => {
+        if (!arr.length) return;
+
+        stacks++;
+
+        const cur = Math.max(...arr.map(d => d.tier));
+        const cap = Math.min(...arr.map(d => tierLimitByItem(d)));
+        const free = Math.max(0, cap - cur);
+
+        buckets[Math.min(3, free)]++;
+    }));
+
+    const labels = ["0 (впритык)", "1", "2", "3+"];
+    const colors = ["var(--danger)", "#d98200", "var(--accent)", "#3a9c8c"];
+    const maxB = Math.max(1, ...buckets);
+
+    $("#ax-hist").innerHTML = buckets.map((v, i) => {
+        const hp = Math.round(v / maxB * 100);
+
+        return `<div class="col">
+            <span class="cv">${v}</span>
+            <div class="bar" style="background:${colors[i]}" data-h="${hp}"></div>
+            <span class="cl">${labels[i]}</span>
+        </div>`;
+    }).join("");
+
+    requestAnimationFrame(() => {
+        $("#ax-hist").querySelectorAll(".bar").forEach(b => {
+            b.style.height = Math.max(4, +b.dataset.h) + "%";
+        });
+    });
+
+    $("#ax-sub").textContent = `${blockNames.length} секций · ${stacks} штабелей` + (planMode ? " · черновик" : "");
+}
+
+function aimBlock(name) {
+    if (view !== "stacks") return;
+
+    const bl = yard.querySelector('.stack-block[data-block="' + name + '"]');
+
+    if (bl) {
+        bl.scrollIntoView({ block: "center", behavior: "smooth" });
+        bl.classList.remove("aim");
+        void bl.offsetWidth;
+        bl.classList.add("aim");
+
+        setTimeout(() => bl.classList.remove("aim"), 1400);
+    }
+}
+
+function findFreeSlot(caption) {
+    for (const [n, lay] of LAYOUT) {
+        for (const bn of lay.bays) {
+            const nt = topTier(n, bn) + 1;
+
+            if (checkTierLimit(caption, n, bn, nt).ok) {
+                return { block: n, bay: bn, tier: nt };
+            }
+        }
+    }
+
+    return { block: [...LAYOUT.keys()][0] || "A", bay: 1, tier: 1 };
+}
+
+function buildLegend() {
+    $("#yardLegend").innerHTML = Object.values(STATES).map(s =>
+        `<div class="lg-row"><span class="sw" style="background:${s.color}"></span>${s.name}</div>`
+    ).join("") +
+        `<div class="lg-row" style="margin-top:4px;border-top:1px dashed var(--line);padding-top:6px"><span class="sw" style="background:#3a8a63"></span>поступление</div>` +
+        `<div class="lg-row"><span class="sw" style="background:var(--pr-weigh)"></span>взвешивание</div>` +
+        `<div class="lg-row"><span class="sw" style="background:var(--pr-store)"></span>хранение</div>` +
+        `<div class="lg-row"><span class="sw" style="background:var(--pr-ship)"></span>отгрузка</div>`;
+}
+
+/* ============================================================
+   SLOT PICKER
+============================================================ */
+
+let currentSlotTarget = null;
+let slotSearchTimeout = null;
+
+window.openSlotPicker = function(block, bay, tier) {
+    currentSlotTarget = { block, bay, tier };
+
+    $("#slotTargetInfo").textContent = `Цель: Секция ${block} · Ряд ${pad2(bay)} · Ярус ${tier}`;
+
+    const input = $("#slotSearchInput");
+    const list = $("#slotResultsList");
+
+    input.value = "";
+    list.innerHTML = `<div style="text-align:center;color:var(--muted);padding:20px;">Введите номер для поиска...</div>`;
+
+    const modal = $("#slotPicker");
+    const scrim = $("#slotScrim");
+
+    modal.style.display = "flex";
+    setTimeout(() => modal.classList.add("open"), 10);
+
+    scrim.style.display = "block";
+    setTimeout(() => scrim.classList.add("open"), 10);
+
+    setTimeout(() => input.focus(), 100);
+};
+
+function closeSlotPicker() {
+    const modal = $("#slotPicker");
+    const scrim = $("#slotScrim");
+
+    modal.classList.remove("open");
+    scrim.classList.remove("open");
+
+    setTimeout(() => {
+        modal.style.display = "none";
+        scrim.style.display = "none";
+    }, 300);
+
+    currentSlotTarget = null;
+}
+
+$("#slotSearchInput").addEventListener("input", function(e) {
+    const q = e.target.value.trim();
+    const list = $("#slotResultsList");
+
+    clearTimeout(slotSearchTimeout);
+
+    if (!q) {
+        list.innerHTML = `<div style="text-align:center;color:var(--muted);padding:20px;">Введите номер...</div>`;
+        return;
+    }
+
+    list.innerHTML = `<div style="text-align:center;color:var(--muted);padding:20px;">Поиск...</div>`;
+
+    slotSearchTimeout = setTimeout(() => {
+        const normalized = q.toUpperCase().replace(/\s+/g, "");
+
+        const results = DATA
+            .filter(d => (d.prefix + d.number).toUpperCase().includes(normalized))
+            .slice(0, 50);
+
+        if (!results.length) {
+            list.innerHTML = `<div style="text-align:center;color:var(--muted);padding:20px;">Ничего не найдено</div>`;
+            return;
+        }
+
+        list.innerHTML = results.map(d => {
+            const s = stateOf(d.state);
+            const currentLoc = d.block ? `${d.block}/${pad2(d.bay)}/T${d.tier}` : "Без координат";
+            const isSameSpot = currentSlotTarget &&
+                d.block === currentSlotTarget.block &&
+                Number(d.bay) === Number(currentSlotTarget.bay) &&
+                Number(d.tier) === Number(currentSlotTarget.tier);
+
+            return `<div class="row" style="height:auto;padding:10px;margin-bottom:0;cursor:${isSameSpot ? 'not-allowed' : 'pointer'};opacity:${isSameSpot ? '0.5' : '1'};"
+                ${!isSameSpot ? `onclick="moveContainerFromDB(${d.id})"` : ""}>
+                <div class="mini" style="--c:${s.color}"></div>
+                <div class="id" style="min-width:120px;">
+                    <div class="pn">${d.prefix} ${d.number}</div>
+                    <div class="ty">${d.typeLegacy || "—"}</div>
+                </div>
+                <div style="flex:1;font-size:12px;color:var(--muted);">
+                    Сейчас: <b style="color:var(--ink-soft)">${currentLoc}</b>
+                </div>
+                <div style="font-size:12px;color:var(--accent);font-weight:600;">
+                    ${isSameSpot ? "Уже здесь" : `→ ${currentSlotTarget.block}/${pad2(currentSlotTarget.bay)}/T${currentSlotTarget.tier}`}
+                </div>
+            </div>`;
+        }).join("");
+    }, 150);
+});
+
+window.moveContainerFromDB = async function(containerId) {
+    if (!currentSlotTarget) return;
+
+    const target = currentSlotTarget;
+
+    try {
+        const payload = {
+            block: target.block,
+            bay: target.bay,
+            tier: target.tier
+        };
+
+        const res = await fetch(`${API_BASE}/containers/${containerId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error("Ошибка сохранения координат");
+
+        let mapped = null;
+
+        try {
+            const dataRes = await fetch(`${API_BASE}/containers/${containerId}`);
+            if (dataRes.ok) mapped = mapDto(await dataRes.json());
+        } catch (e) {
+            console.warn("Не удалось получить полные данные контейнера", e);
+        }
+
+        const existingIdx = DATA.findIndex(d => d.id === containerId);
+
+        if (mapped) {
+            if (existingIdx >= 0) DATA[existingIdx] = mapped;
+            else DATA.push(mapped);
+        } else if (existingIdx >= 0) {
+            DATA[existingIdx].block = target.block;
+            DATA[existingIdx].bay = target.bay;
+            DATA[existingIdx].tier = target.tier;
+        }
+
+        LAYOUT = buildLayoutFromData(DATA);
+
+        closeSlotPicker();
+
+        toast("Контейнер установлен");
+
+        buildFacets();
+        render(false);
+
+    } catch (e) {
+        console.error(e);
+        toast("Ошибка установки контейнера", true);
+    }
+};
+
+const slotCloseBtn = $("#slotPickerCloseBtn");
+const slotScrimEl = $("#slotScrim");
+
+if (slotCloseBtn) slotCloseBtn.onclick = closeSlotPicker;
+if (slotScrimEl) slotScrimEl.onclick = closeSlotPicker;
+
+/* ============================================================
+   EVENT LISTENERS
+============================================================ */
+
+$("#drDelete").onclick = async () => {
+    if (!canWrite()) {
+        toast("Недостаточно прав для удаления", true);
+        return;
+    }
+
+    if (!editing) return;
+
+    if (!confirm(`Удалить контейнер ${editing.prefix} ${editing.number}? Это действие необратимо.`)) {
+        return;
+    }
+
+    try {
+        if (dataSource === "db" && !editing.isNew) {
+            const res = await fetch(`${API_BASE}/containers/${editing.id}`, {
+                method: "DELETE"
+            });
+
+            if (!res.ok) throw new Error("Ошибка удаления на сервере");
+        }
+
+        const idx = DATA.findIndex(d => d.id === editing.id);
+        if (idx >= 0) DATA.splice(idx, 1);
+
+        LAYOUT = buildLayoutFromData(DATA);
+        pagination.totalElements = DATA.length;
+
+        closeDrawer();
+
+        toast("Контейнер удален");
+
+        $("#total").textContent = fmt(DATA.length);
+        buildFacets();
+        render(true);
+
+    } catch (e) {
+        console.error(e);
+        toast("Ошибка удаления: " + e.message, true);
+    }
+};
+
+$("#viewSeg").querySelectorAll("button").forEach(b => {
+    b.onclick = () => {
+        if (drag) cleanupDrag();
+
+        if (marquee) {
+            if (marquee.el) marquee.el.remove();
+            marquee = null;
+        }
+
+        clearSelection();
+
+        view = b.dataset.view;
+
+        $("#viewSeg").querySelectorAll("button").forEach(x => {
+            x.classList.toggle("on", x === b);
+        });
+
+        render(true);
+    };
+});
+
+let searchT;
+
+$("#search").addEventListener("input", e => {
+    clearTimeout(searchT);
+
+    const v = e.target.value;
+
+    searchT = setTimeout(() => {
+        query = v.trim();
+        applyChange(true);
+    }, 150);
+});
+
+$("#sortSel").addEventListener("change", e => {
+    sort = e.target.value;
+
+    if (view !== "stacks") render(true);
+});
+
+$("#resetBtn").onclick = () => {
+    filters.state.clear();
+    filters.proc.clear();
+    filters.type.clear();
+    filters.own.clear();
+
+    query = "";
+    $("#search").value = "";
+
+    document.querySelectorAll(".chip.active").forEach(c => c.classList.remove("active"));
+
+    applyChange(true);
+};
+
+$("#undoBtn").onclick = undoLastMove;
+$("#redoBtn").onclick = redoLastMove;
+
+$("#planBtn").onclick = async () => {
+    if (!canWrite()) {
+        toast("Недостаточно прав", true);
+        return;
+    }
+
+    if (!planMode) {
+        await enterPlan();
+    } else {
+        if (confirm("Применить план к фактическому размещению?")) {
+            await applyPlan();
+        }
+    }
+};
+
+$("#cancelPlanBtn").onclick = () => {
+    if (confirm("Отменить все изменения в плане и вернуться к факту?")) {
+        cancelPlan();
+    }
+};
+
+$("#analyticsBtn").onclick = openAnalytics;
+$("#axClose").onclick = closeAnalytics;
+$("#axScrim").onclick = closeAnalytics;
+
+$("#roleOpts").querySelectorAll("button").forEach(b => {
+    b.onclick = () => setRole(b.dataset.role);
+});
+
+$("#drTabs").querySelectorAll("button").forEach(b => {
+    b.onclick = () => setTab(b.dataset.tab);
+});
+
+$("#drClose").onclick = closeDrawer;
+$("#scrim").onclick = closeDrawer;
+$("#drCancel").onclick = closeDrawer;
+$("#drSave").onclick = saveDrawer;
+$("#docAdd").onclick = addDoc;
+
+["#f-pre", "#f-num", "#f-iso"].forEach(s => {
+    const el = $(s);
+    if (el) el.addEventListener("input", liveHeader);
+});
+
+$("#f-state").addEventListener("change", liveHeader);
+$("#f-proc").addEventListener("change", liveHeader);
+
+["#f-pw", "#f-tare", "#f-gross", "#f-grep"].forEach(s => {
+    $(s).addEventListener("input", updateMassInfo);
+});
+
+$("#bb-apply").onclick = bulkApply;
+$("#bb-close").onclick = clearSelection;
+
+["#bb-state", "#bb-proc", "#bb-owner", "#bb-kgmk"].forEach(s => {
+    $(s).addEventListener("change", e => {
+        e.target.classList.toggle("touched", e.target.value !== "");
+    });
+});
+
+$("#newBtn").onclick = () => {
+    if (!canWrite()) {
+        toast("Недостаточно прав для создания", true);
+        return;
+    }
+
+    const nid = -Date.now();
+
+    const nd = {
+        id: nid,
+        isNew: true,
+
+        prefix: PREFIXES.length ? PREFIXES[0] : "NMKU",
+        number: "",
+
+        iso: "",
+        typeLegacy: "",
+        typeId: null,
+
+        pw: null,
+        tareFact: null,
+        gross: null,
+        grossRepeat: null,
+
+        state: "inuse",
+        procState: "",
+
+        owner: OWNERS.length ? OWNERS[0].fullName : "Не назначен",
+        kgmk: true,
+        retired: false,
+
+        block: null,
+        bay: null,
+        tier: null,
+
+        docs: [],
+        moveLog: [],
+        changeLog: [],
+
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        note: ""
+    };
+
+    DATA.push(JSON.parse(JSON.stringify(nd)));
+
+    openDrawer(nid);
+
+    if (editing) editing.isNew = true;
+};
+
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+        if (planMode) {
+            cancelPlan();
+            return;
+        }
+
+        if ($("#analytics").classList.contains("open")) closeAnalytics();
+        else if (drag && drag.active) cleanupDrag();
+        else if (marquee) {
+            if (marquee.el) marquee.el.remove();
+            marquee = null;
+            clearSelection();
+        }
+        else if ($("#drawer").classList.contains("open")) closeDrawer();
+        else if (selectedIds.size) clearSelection();
+    }
+});
+
+new ResizeObserver(() => {
+    if (view === "yard" && yard._v) {
+        yard._v.refreshCols(yardCols());
+    }
+}).observe(yard);
+
+/* ============================================================
+   INIT
+============================================================ */
+
+$("#bb-state").innerHTML = `<option value="">— не менять —</option>` +
+    Object.entries(STATES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join("");
+
+$("#bb-proc").innerHTML = `<option value="">— не менять —</option><option value="__none">не в операции</option>` +
+    Object.entries(PROC).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join("");
+
+$("#bb-owner").innerHTML = `<option value="">— не менять —</option>`;
+$("#bb-kgmk").innerHTML = `<option value="">— не менять —</option><option value="1">Да</option><option value="0">Нет</option>`;
+
+buildLegend();
+
+(async function init() {
+    await loadData();
+
+    initCombobox("f-pre", "list-prefix", "cb-prefix", () => PREFIXES);
+
+    initCombobox("f-type", "list-type", "cb-type", () => {
+        return window.CONTAINER_TYPES && window.CONTAINER_TYPES.length
+            ? window.CONTAINER_TYPES
+            : DEMO_TYPES.map(t => ({ caption: t }));
+    });
+
+    setupInfiniteScroll();
+
+    buildFacets();
+    setRole("editor");
+    render(true);
+})();
+</script>
