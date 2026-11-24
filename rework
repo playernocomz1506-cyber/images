@@ -1,303 +1,109 @@
-/* ============================================================
-ЗАГРУЗКА ДАННЫХ: ПОЛНЫЙ СПИСОК БЕЗ ПАГИНАЦИИ
-============================================================ */
+function buildFacets() {
+    const fill = (id, entries, hasDot) => {
+        const f = $(id);
+        if (!f) return;
 
-let DATA = [];
-let dataSource = "demo";
+        f.querySelectorAll(".chip").forEach(c => c.remove());
 
-const API_BASE = "http://172.27.93.55:8888/api";
-
-// Загружаем весь справочник. Для ~11-12 тыс. контейнеров это нормально.
-const pagination = {
-    page: 0,
-    size: 50000,
-    chunkSize: 1000,
-    totalElements: 0,
-    isLoading: false,
-    hasMore: false
-};
-
-let ALL_TYPES = [];
-
-function mapDto(x) {
-    const rawNumber = String(x.numContainer ?? "").replace(/\D/g, "");
-
-    // Если с бэка пришёл checkDigit — используем его.
-    // Иначе берём последнюю цифру из 7-значного номера.
-    const serial6 = rawNumber.length >= 7
-        ? rawNumber.slice(0, 6)
-        : rawNumber.padStart(6, "0").slice(-6);
-
-    const checkDigit = x.checkDigit != null
-        ? String(x.checkDigit)
-        : (rawNumber.length >= 7 ? rawNumber.slice(6, 7) : "");
-
-    return {
-        id: x.id,
-        prefix: x.prefix || "",
-        number: (serial6 + checkDigit).padEnd(7, "0"),
-
-        typeLegacy: x.typeCaption || x.typeLegacy || "",
-        iso: x.isoCode || x.isoTypeCode || "",
-
-        pw: x.tareStencilKg != null ? Math.round(Number(x.tareStencilKg)) : 0,
-        tareFact: x.tareFactKg != null ? Math.round(Number(x.tareFactKg)) : null,
-        gross: x.grossKg != null ? Math.round(Number(x.grossKg)) : null,
-        grossRepeat: x.grossRepeatKg != null ? Math.round(Number(x.grossRepeatKg)) : null,
-
-        state: x.state || "inuse",
-        procState: x.procState || "",
-
-        owner: x.responsible || "Не назначен",
-        kgmk: !!x.isKgmk,
-
-        // Поддерживаем оба варианта, если где-то ещё осталась старая инверсия
-        retired: x.isRetired != null
-            ? !!x.isRetired
-            : (x.isUnretired != null ? !!x.isUnretired : false),
-
-        block: x.block || null,
-        bay: x.bay != null ? Number(x.bay) : null,
-        tier: x.tier != null ? Number(x.tier) : null,
-
-        docs: x.docs || [],
-        moveLog: x.moveLog || [],
-        changeLog: x.changeLog || [],
-
-        createdAt: x.createdAt ? new Date(x.createdAt).getTime() : Date.now(),
-        updatedAt: x.updatedAt ? new Date(x.updatedAt).getTime() : Date.now(),
-
-        note: x.notes || ""
+        entries.forEach(([val, name, count, color]) => {
+            f.insertAdjacentHTML(
+                "beforeend",
+                chipHTML(id.split("-")[1], val, name, count, color, hasDot)
+            );
+        });
     };
-}
 
-function buildLayoutFromData(dataList) {
-    const layoutMap = new Map();
+    // 1. Состояние
+    fill("#facet-state", [
+        [
+            "inuse",
+            STATES.inuse?.name || "Удовлетворительное",
+            DATA.filter(d => d.state === "inuse").length,
+            STATES.inuse?.hex || "#2f6b4f"
+        ],
+        [
+            "damaged",
+            STATES.damaged?.name || "Брак",
+            DATA.filter(d => d.state === "damaged").length,
+            STATES.damaged?.hex || "#9c3b22"
+        ]
+    ], true);
 
-    dataList.forEach(d => {
-        if (!d.block) return;
+    // 2. Статус операции
+    const procEntries = [
+        [
+            "__none",
+            "не в операции",
+            DATA.filter(d => !d.procState).length,
+            "#9aa7b4"
+        ]
+    ];
 
-        if (!layoutMap.has(d.block)) {
-            layoutMap.set(d.block, { bays: new Set() });
-        }
-
-        if (d.bay != null) {
-            layoutMap.get(d.block).bays.add(Number(d.bay));
-        }
-    });
-
-    return layoutMap;
-}
-
-async function loadDictionaries() {
-    try {
-        const [ownersRes, prefixesRes, statesRes, typesRes] = await Promise.all([
-            fetch(`${API_BASE}/dictionaries/owners`),
-            fetch(`${API_BASE}/dictionaries/prefixes`),
-            fetch(`${API_BASE}/dictionaries/states`),
-            fetch(`${API_BASE}/dictionaries/types`)
+    Object.entries(PROC).forEach(([code, p]) => {
+        procEntries.push([
+            code,
+            p.name,
+            DATA.filter(d => d.procState === code).length,
+            p.hex
         ]);
-
-        if (ownersRes.ok) {
-            OWNERS = await ownersRes.json();
-
-            const ownerSelect = document.getElementById("f-owner");
-            const bulkOwnerSelect = document.getElementById("bb-owner");
-
-            const optionsHtml = OWNERS
-                .map(o => `<option value="${o.fullName}">${o.fullName}</option>`)
-                .join("");
-
-            if (ownerSelect) {
-                ownerSelect.innerHTML = `<option value="">Не назначен</option>` + optionsHtml;
-            }
-
-            if (bulkOwnerSelect) {
-                bulkOwnerSelect.innerHTML = `<option value="">— не менять —</option>` + optionsHtml;
-            }
-        }
-
-        if (prefixesRes.ok) {
-            const prefixesJson = await prefixesRes.json();
-            PREFIXES = prefixesJson.map(p => p.prefix).filter(Boolean);
-        }
-
-        if (statesRes.ok) {
-            const statesJson = await statesRes.json();
-
-            statesJson.forEach(s => {
-                if (!s.code) return;
-
-                STATES[s.code] = {
-                    name: s.name || s.code,
-                    color: s.colorHex || STATES[s.code]?.color || "#888",
-                    hex: s.colorHex || STATES[s.code]?.hex || "#888",
-                    pulse: !!s.pulse
-                };
-            });
-        }
-
-        if (typesRes.ok) {
-            const typesJson = await typesRes.json();
-
-            window.CONTAINER_TYPES = typesJson.filter(t => !isJunkType(t.caption));
-            ALL_TYPES = window.CONTAINER_TYPES.map(t => t.caption).filter(Boolean);
-        } else {
-            window.CONTAINER_TYPES = DEMO_TYPES.map(caption => ({ caption }));
-            ALL_TYPES = [...DEMO_TYPES];
-        }
-
-    } catch (e) {
-        console.warn("Не удалось загрузить справочники, используем дефолтные", e);
-
-        window.CONTAINER_TYPES = DEMO_TYPES.map(caption => ({ caption }));
-        ALL_TYPES = [...DEMO_TYPES];
-    }
-}
-
-async function fetchAllContainers() {
-    const out = [];
-    let page = 0;
-    const size = pagination.chunkSize;
-
-    while (true) {
-        const params = new URLSearchParams({
-            page: String(page),
-            size: String(size)
-        });
-
-        const res = await fetch(`${API_BASE}/containers?${params.toString()}`);
-        if (!res.ok) throw new Error("Ошибка загрузки контейнеров");
-
-        const chunk = await res.json();
-        if (!Array.isArray(chunk)) throw new Error("API вернул не массив контейнеров");
-
-        out.push(...chunk);
-
-        if (chunk.length < size) break;
-
-        page++;
-
-        // страховка от бесконечного цикла
-        if (page > 1000) break;
-    }
-
-    return out;
-}
-
-async function loadData() {
-    pagination.isLoading = true;
-
-    try {
-        await loadDictionaries();
-
-        DATA = [];
-        LAYOUT = new Map();
-
-        const arr = await fetchAllContainers();
-
-        DATA = arr.map(mapDto);
-        dataSource = "db";
-
-        pagination.totalElements = DATA.length;
-        pagination.hasMore = false;
-
-        LAYOUT = buildLayoutFromData(DATA);
-
-        DATA.forEach(d => {
-            d.docs = d.docs || [];
-            d.moveLog = d.moveLog || [];
-            d.changeLog = d.changeLog || [];
-        });
-
-        $("#total").textContent = fmt(pagination.totalElements);
-
-    } catch (e) {
-        console.error("Ошибка загрузки БД, фолбэк на демо", e);
-
-        DATA = genData(1240);
-        dataSource = "demo";
-
-        LAYOUT = buildLayoutFromData(DATA);
-        pagination.totalElements = DATA.length;
-        pagination.hasMore = false;
-
-        $("#total").textContent = fmt(pagination.totalElements);
-    } finally {
-        pagination.isLoading = false;
-    }
-
-    buildFacets();
-    updateTopCounters();
-}
-
-// Больше не нужен. Оставляем пустым, чтобы старый вызов не ломал код.
-function setupInfiniteScroll() {
-    // Все данные уже загружены. Догрузка по скроллу отключена.
-}
-
-async function reloadAllData(resetScroll = true) {
-    await loadData();
-    render(resetScroll);
-}
-
-function initCombobox(inputId, listId, containerId, getDataFn) {
-    const input = document.getElementById(inputId);
-    const list = document.getElementById(listId);
-    const container = document.getElementById(containerId);
-
-    if (!input || !list || !container) return;
-
-    const toggleList = (show) => {
-        if (show) {
-            container.classList.add("open");
-            renderOptions(input.value);
-        } else {
-            setTimeout(() => container.classList.remove("open"), 150);
-        }
-    };
-
-    const renderOptions = (filterText = "") => {
-        const items = getDataFn() || [];
-        const filter = String(filterText || "").toUpperCase();
-
-        const filtered = items
-            .map(item => typeof item === "string" ? item : item.caption)
-            .filter(Boolean)
-            .filter(val => !isJunkType(val))
-            .filter(val => val.toUpperCase().includes(filter))
-            .sort((a, b) => a.localeCompare(b, "ru"));
-
-        const limited = filtered.slice(0, 80);
-
-        list.innerHTML = limited.map(val => {
-            const selected = val === input.value ? "selected" : "";
-            return `<div class="option ${selected}" data-value="${val}">${val}</div>`;
-        }).join("");
-
-        if (!limited.length) {
-            list.innerHTML = `<div class="option" style="color:var(--muted);cursor:default;">Ничего не найдено</div>`;
-        }
-    };
-
-    input.addEventListener("focus", () => toggleList(true));
-    input.addEventListener("click", () => toggleList(true));
-
-    document.addEventListener("click", e => {
-        if (!container.contains(e.target)) toggleList(false);
     });
 
-    input.addEventListener("input", e => {
-        renderOptions(e.target.value);
-        container.classList.add("open");
+    fill("#facet-proc", procEntries, true);
+
+    // 3. Тип контейнера — полный справочник + реальные типы из DATA
+    const typeCounts = new Map();
+
+    // Сначала все типы из справочника с 0
+    (window.CONTAINER_TYPES || []).forEach(t => {
+        if (!t.caption || isJunkType(t.caption)) return;
+        typeCounts.set(t.caption, 0);
     });
 
-    list.addEventListener("click", e => {
-        const option = e.target.closest(".option");
-        if (!option || !option.dataset.value) return;
+    // Потом считаем реальные контейнеры
+    DATA.forEach(d => {
+        const cap = d.typeLegacy || "—";
+        if (isJunkType(cap)) return;
+        typeCounts.set(cap, (typeCounts.get(cap) || 0) + 1);
+    });
 
-        input.value = option.dataset.value;
-        toggleList(false);
-        input.dispatchEvent(new Event("input"));
+    const typeEntries = Array.from(typeCounts.entries())
+        .sort((a, b) => a[0].localeCompare(b[0], "ru"))
+        .map(([cap, count]) => [cap, cap, count, null]);
+
+    fill("#facet-type", typeEntries, false);
+
+    // 4. Собственность
+    fill("#facet-own", [
+        [
+            "kgmk",
+            "Собственность КГМК",
+            DATA.filter(d => d.kgmk).length,
+            "var(--accent)"
+        ],
+        [
+            "other",
+            "Прочие / аренда",
+            DATA.filter(d => !d.kgmk).length,
+            "#8593a1"
+        ]
+    ], false);
+
+    document.querySelectorAll(".chip").forEach(c => {
+        const set = filters[c.dataset.facet];
+        if (!set) return;
+
+        if (set.has(c.dataset.val)) {
+            c.classList.add("active");
+        }
+
+        c.onclick = () => {
+            if (set.has(c.dataset.val)) set.delete(c.dataset.val);
+            else set.add(c.dataset.val);
+
+            c.classList.toggle("active");
+
+            // Теперь всё локально, потому что DATA полный
+            applyChange(true);
+        };
     });
 }
