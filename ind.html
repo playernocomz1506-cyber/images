@@ -1,4 +1,1395 @@
-function buildFacets() {
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ТехКонтроль · Справочник контейнеров</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ... (CSS остается без изменений, он у тебя правильный) ... */
+    :root{
+    --bg:#e7eaee; --bg-2:#dde2e8; --yard:#d3d9e0;
+    --surface:#fff; --surface-2:#f5f7f9;
+    --ink:#15202b; --ink-soft:#33424f; --muted:#66778a;
+    --line:#d2d9e1; --line-soft:#e3e8ee;
+    --accent:#0e6f63; --accent-d:#0a564d; --accent-soft:#d9efe9;
+    --danger:#b23a22; --signal:#d98200;
+    --st-inuse:#2f6b4f; --st-free:#1f4e6b; --st-repair:#b9821a; --st-damaged:#9c3b22; --st-retired:#5a6877;
+    --pr-weigh:#1f6b8a; --pr-store:#7a5a1e; --pr-ship:#5a3a8a;
+    --shadow:0 1px 2px rgba(20,32,43,.06),0 8px 24px rgba(20,32,43,.08);
+    --shadow-lg:0 12px 40px rgba(20,32,43,.22);
+    --tier-h:24px; --tier-step:26px; --ground:22px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:"IBM Plex Sans",system-ui,sans-serif;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased;overflow:hidden}
+    body.dragging-active{cursor:grabbing}
+    body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:radial-gradient(1200px 600px at 80% -10%,rgba(255,255,255,.6),transparent 60%),
+    radial-gradient(900px 500px at 0% 110%,rgba(120,135,150,.18),transparent 60%),
+    repeating-linear-gradient(0deg,rgba(255,255,255,.04) 0 1px,transparent 1px 3px),
+    linear-gradient(180deg,var(--bg),var(--bg-2))}
+    .app{position:relative;z-index:1;display:flex;flex-direction:column;height:100vh}
+    .topbar{display:flex;align-items:center;gap:14px;padding:11px 20px;background:rgba(255,255,255,.82);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);flex-wrap:wrap}
+    .brand{display:flex;align-items:center;gap:12px;min-width:max-content}
+    .brand .mark{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:linear-gradient(150deg,var(--accent),var(--accent-d));color:#fff;box-shadow:0 4px 12px rgba(14,111,99,.35)}
+    .brand .mark svg{width:22px;height:22px}
+    .brand h1{font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.04em;text-transform:uppercase;font-size:17px;margin:0;line-height:1}
+    .brand small{display:block;color:var(--muted);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin-top:3px}
+    .search{flex:0.1;max-width:380px;min-width:180px;position:relative}
+    .search svg{position:absolute;left:13px;top:50%;transform:translateY(-50%);width:17px;height:17px;color:var(--muted)}
+    .search input{width:100%;padding:10px 14px 10px 40px;border:1px solid var(--line);border-radius:11px;background:var(--surface-2);font:inherit;font-size:14px;color:var(--ink);transition:.18s}
+    .search input:focus{outline:none;border-color:var(--accent);background:#fff;box-shadow:0 0 0 4px var(--accent-soft)}
+    .topbar .spacer{flex:1}
+    .stat-pill{display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);font-size:12px;color:var(--ink-soft)}
+    .stat-pill b{font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--ink);min-width:26px;text-align:right;display:inline-block}
+    .stat-pill .dot{width:8px;height:8px;border-radius:50%;background:var(--st-inuse);box-shadow:0 0 0 3px rgba(47,107,79,.18);animation:led 2.2s infinite}
+    .stat-pill.src-db{border-color:#bfe3da;background:var(--accent-soft);color:var(--accent-d);font-weight:600}
+    .stat-pill.proc{gap:11px}
+    .stat-pill.proc .pc{display:flex;align-items:center;gap:5px}
+    .stat-pill.proc .pc .d{width:8px;height:8px;border-radius:50%}
+    .stat-pill.proc .pc b{min-width:18px}
+    .role-seg{display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;padding:3px 3px 3px 11px}
+    .role-seg .rl{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600}
+    .role-seg .opts{display:inline-flex;background:#fff;border-radius:8px;padding:2px;gap:2px}
+    .role-seg button{border:none;background:none;cursor:pointer;font:inherit;font-size:11.5px;font-weight:600;color:var(--muted);padding:5px 10px;border-radius:6px;transition:.15s}
+    .role-seg button.on{background:var(--accent);color:#fff;box-shadow:0 2px 6px rgba(14,111,99,.3)}
+    .role-seg .who{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .btn{display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;font:inherit;font-weight:600;font-size:13.5px;padding:10px 16px;border-radius:11px;background:var(--accent);color:#fff;box-shadow:0 4px 14px rgba(14,111,99,.3);transition:.16s}
+    .btn:hover{background:var(--accent-d);transform:translateY(-1px)}
+    .btn:active{transform:translateY(0)}
+    .btn svg{width:16px;height:16px}
+    .btn:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+    .btn.ghost{background:var(--surface);color:var(--ink-soft);border:1px solid var(--line);box-shadow:none}
+    .btn.ghost:hover{background:var(--surface-2);border-color:#bcc6d0}
+    .layout{flex:1;display:flex;min-height:0}
+    .sidebar{width:268px;flex-shrink:0;background:rgba(255,255,255,.7);border-right:1px solid var(--line);padding:18px 16px;overflow-y:auto}
+    .side-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+    .side-head h2{font-family:"Oswald",sans-serif;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+    .reset{background:none;border:none;color:var(--accent);font:inherit;font-size:12px;font-weight:600;cursor:pointer;padding:2px 4px;border-radius:6px}
+    .reset:hover{background:var(--accent-soft)}
+    .facet{margin-top:18px}
+    .facet>.label{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:9px}
+    .chip{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line-soft);border-radius:10px;padding:9px 11px;margin-bottom:7px;cursor:pointer;font:inherit;font-size:13px;color:var(--ink-soft);transition:.15s}
+    .chip:hover{border-color:#bcc6d0;background:#fff}
+    .chip .c-dot{width:11px;height:11px;border-radius:3px;flex-shrink:0}
+    .chip .c-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .chip .c-count{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);background:var(--surface-2);padding:1px 7px;border-radius:999px;border:1px solid var(--line-soft)}
+    .chip.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-d);font-weight:600}
+    .chip.active .c-count{background:#fff;border-color:var(--accent);color:var(--accent-d)}
+    .chip .check{width:15px;height:15px;border-radius:5px;border:1.5px solid var(--line);display:grid;place-items:center;flex-shrink:0}
+    .chip.active .check{background:var(--accent);border-color:var(--accent)}
+    .chip .check svg{width:10px;height:10px;color:#fff;opacity:0}
+    .chip.active .check svg{opacity:1}
+    .yard-wrap{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0;position:relative}
+    .yard-bar{display:flex;align-items:center;gap:12px;padding:12px 24px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.5);flex-wrap:wrap}
+    .seg{display:inline-flex;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;padding:3px;gap:2px}
+    .seg button{display:flex;align-items:center;gap:7px;border:none;background:none;cursor:pointer;font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);padding:7px 13px;border-radius:8px;transition:.15s}
+    .seg button svg{width:15px;height:15px}
+    .seg button.on{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
+    .yard-bar .count{font-size:13px;color:var(--muted)}
+    .yard-bar .count b{color:var(--ink);font-family:"IBM Plex Mono",monospace}
+    .yard-bar .spacer{flex:1}
+    .sort{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--muted)}
+    .sort select{font:inherit;font-size:12.5px;border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:#fff;color:var(--ink-soft);cursor:pointer}
+    .sort.dim-ctl{opacity:.45;pointer-events:none}
+    .hint-drag{display:none;align-items:center;gap:7px;font-size:11.5px;color:var(--accent-d);font-weight:600;background:var(--accent-soft);border:1px solid #bfe3da;padding:5px 11px;border-radius:999px}
+    .hint-drag svg{width:13px;height:13px}
+    .yard-wrap.is-stacks .hint-drag{display:inline-flex}
+    .yard-hint{display:none;align-items:center;gap:7px;font-size:11.5px;color:#8a6512;font-weight:600;background:#fbf3e2;border:1px solid #ecd9ad;padding:5px 11px;border-radius:999px}
+    .btn-icon{position:relative;display:none;align-items:center;justify-content:center;width:38px;height:38px;border-radius:11px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;transition:.16s;box-shadow:0 1px 2px rgba(20,32,43,.06)}
+    .btn-icon svg{width:18px;height:18px}
+    .btn-icon:hover:not(.disabled){background:var(--accent-soft);border-color:#bfe3da;color:var(--accent-d)}
+    .btn-icon:active:not(.disabled){transform:translateY(1px)}
+    .btn-icon.disabled{opacity:.5;cursor:not-allowed}
+    .yard-wrap.is-stacks .btn-icon{display:inline-flex}
+    .btn-icon .ub{position:absolute;top:-7px;right:-7px;min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--accent);color:#fff;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:600;display:none;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(14,111,99,.4);border:1.5px solid #fff}
+    .btn-icon .ub.bump{animation:ubump .34s cubic-bezier(.2,1.4,.4,1)}
+    @keyframes ubump{0%{transform:scale(.4)}55%{transform:scale(1.25)}100%{transform:scale(1)}}
+    .btn-toggle{display:none;align-items:center;gap:7px;font:inherit;font-weight:600;font-size:12.5px;padding:8px 13px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink-soft);cursor:pointer;transition:.16s}
+    .btn-toggle svg{width:15px;height:15px}
+    .btn-toggle:hover{background:var(--surface-2);border-color:#bcc6d0}
+    .yard-wrap.is-stacks .btn-toggle{display:inline-flex}
+    .btn-toggle.plan-on{background:#3a2a14;border-color:#7a5a1e;color:#ffd98a;box-shadow:0 0 0 3px rgba(217,130,0,.18)}
+    .undo-rail{display:none;align-items:center;gap:12px;padding:8px 24px;background:rgba(255,255,255,.42);border-bottom:1px solid var(--line-soft)}
+    .yard-wrap.is-stacks .undo-rail.has{display:flex}
+    .ur-cap{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600;flex-shrink:0}
+    .ur-track{flex:1;min-width:0;position:relative;height:30px;display:flex;align-items:center;overflow-x:auto;overflow-y:hidden}
+    .ur-line{position:absolute;left:0;right:0;top:50%;height:2px;background:var(--line);transform:translateY(-50%)}
+    .ur-tick{position:relative;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;padding:0 9px;cursor:pointer;z-index:1}
+    .ur-tick .dot{width:11px;height:11px;border-radius:50%;background:#fff;border:2px solid var(--line);transition:.15s}
+    .ur-tick:hover .dot{border-color:var(--accent);transform:scale(1.25)}
+    .ur-tick .lb{position:absolute;top:15px;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--muted);opacity:0;transition:.15s;pointer-events:none}
+    .ur-tick:hover .lb{opacity:1;top:17px}
+    .ur-now{position:relative;flex:0 0 auto;display:flex;flex-direction:column;align-items:center;padding:0 9px;z-index:2}
+    .ur-now .dot{width:13px;height:13px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px rgba(14,111,99,.22);animation:led 2.2s infinite}
+    .ur-now .lb{position:absolute;top:16px;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--accent-d);font-weight:600;white-space:nowrap}
+    .plan-flag{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:20;display:none;align-items:center;gap:8px;font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.16em;text-transform:uppercase;font-size:12px;color:#7a4d00;background:#ffe9b8;border:1px solid #e0b25a;padding:6px 16px;border-radius:999px;box-shadow:0 6px 18px rgba(122,77,0,.25)}
+    .plan-flag .pd{width:9px;height:9px;border-radius:50%;background:var(--signal);animation:led 1.2s infinite}
+    .yard-wrap.plan-mode .plan-flag{display:flex}
+    .yard.plan-mode{box-shadow:inset 0 0 0 3px rgba(217,130,0,.5),inset 0 0 90px rgba(122,77,0,.16)}
+    .yard-legend{position:absolute;right:16px;bottom:16px;z-index:15;display:none;flex-direction:column;gap:5px;background:rgba(255,255,255,.86);backdrop-filter:blur(6px);border:1px solid var(--line);border-radius:11px;padding:9px 12px;box-shadow:var(--shadow)}
+    .yard-wrap.is-stacks .yard-legend{display:flex}
+    .lg-row{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-soft)}
+    .lg-row .sw{width:13px;height:13px;border-radius:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}
+    .tier.search-ring{z-index:6;animation:aimring 1.5s ease-out}
+    @keyframes aimring{0%{box-shadow:0 0 0 0 rgba(14,111,99,.7)}100%{box-shadow:0 0 0 16px rgba(14,111,99,0)}}
+    .yard{flex:1;overflow-y:auto;padding:24px;position:relative;
+    background:repeating-linear-gradient(90deg,transparent 0 118px,rgba(120,135,150,.10) 118px 120px),
+    repeating-linear-gradient(0deg,transparent 0 118px,rgba(120,135,150,.07) 118px 120px),var(--yard)}
+    .vroot{position:relative;width:100%;z-index:1}
+    .vwindow{position:absolute;left:0;right:0;top:0;will-change:top}
+    .vwindow.fresh{animation:vfade .34s ease}
+    @keyframes vfade{from{opacity:0}to{opacity:1}}
+    .box{position:relative;border-radius:10px;cursor:pointer;color:#fff;overflow:hidden;height:174px;background:var(--c,#445);
+    box-shadow:0 2px 0 rgba(0,0,0,.18),0 10px 22px rgba(20,32,43,.18);transition:transform .2s cubic-bezier(.2,.7,.3,1),box-shadow .2s;border:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column}
+    .box:hover{transform:translateY(-6px);box-shadow:0 2px 0 rgba(0,0,0,.18),0 20px 38px rgba(20,32,43,.32);z-index:2}
+    .box.sel{outline:3px solid var(--accent);outline-offset:2px}
+    .box .roof{height:9px;flex-shrink:0;background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(0,0,0,.12))}
+    .box .wall{padding:12px 14px 10px;flex:1;display:flex;flex-direction:column;background:repeating-linear-gradient(90deg,rgba(0,0,0,.10) 0 2px,rgba(255,255,255,.05) 2px 13px)}
+    .box .toprow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+    .box .prefix{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;opacity:.9;background:rgba(0,0,0,.22);padding:2px 7px;border-radius:5px}
+    .box .status-led{width:13px;height:13px;border-radius:50%;background:#fff;box-shadow:0 0 0 3px rgba(0,0,0,.18);flex-shrink:0;margin-top:2px}
+    .box.pulse .status-led{animation:led 1.4s infinite}
+    .box .num{font-family:"Oswald",sans-serif;font-weight:700;font-size:29px;letter-spacing:.03em;line-height:1;margin-top:10px;text-shadow:0 1px 0 rgba(0,0,0,.25)}
+    .box .num .chk{font-size:17px;opacity:.85;border:1.5px solid rgba(255,255,255,.5);border-radius:4px;padding:0 4px;margin-left:5px;vertical-align:middle}
+    .box .num .chk.bad{border-color:#ffd2c7;background:rgba(178,58,34,.55);opacity:1}
+    .box .meta{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;font-size:11px;opacity:.92}
+    .box .meta .type{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:58%}
+    .box .meta .wt{font-family:"IBM Plex Mono",monospace;background:rgba(0,0,0,.22);padding:2px 6px;border-radius:5px}
+    .box .footer{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px 14px;background:rgba(0,0,0,.22);font-size:11px;flex-shrink:0}
+    .box .footer .who{display:flex;align-items:center;gap:6px;opacity:.92;overflow:hidden}
+    .box .footer .av{width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.85);color:#223;display:grid;place-items:center;font-size:9px;font-weight:700;flex-shrink:0}
+    .box .badge-kgmk{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.05em;background:rgba(255,255,255,.9);color:#1d3a35;padding:2px 6px;border-radius:4px;font-weight:600}
+    .box.is-retired{filter:grayscale(.7) brightness(.92)}
+    .box.is-retired .wall::after{content:"ВЫВЕДЕН";position:absolute;inset:9px 0 34px;display:grid;place-items:center;font-family:"Oswald",sans-serif;font-weight:700;letter-spacing:.2em;font-size:22px;color:rgba(255,255,255,.5);transform:rotate(-12deg);background:rgba(0,0,0,.18)}
+    .row{display:flex;align-items:center;gap:14px;background:var(--surface);border:1px solid var(--line-soft);border-radius:12px;padding:0 16px;height:62px;margin-bottom:9px;cursor:pointer;transition:.16s;box-shadow:0 1px 2px rgba(20,32,43,.05)}
+    .row:hover{border-color:#bcc6d0;transform:translateX(3px);box-shadow:var(--shadow)}
+    .row.sel{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+    .row .mini{width:46px;height:34px;border-radius:6px;flex-shrink:0;position:relative;overflow:hidden;background:var(--c);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}
+    .row .mini::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(0,0,0,.16) 0 1px,transparent 1px 5px)}
+    .row .mini .led{position:absolute;top:4px;right:4px;width:7px;height:7px;border-radius:50%;background:#fff}
+    .row .id{min-width:172px}
+    .row .id .pn{font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:14px;color:var(--ink)}
+    .row .id .pn .chk{color:var(--muted);font-weight:500}
+    .row .id .pn .chk.bad{color:var(--danger)}
+    .row .id .ty{font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .row .masses{flex:1;min-width:150px;max-width:260px;display:flex;gap:12px}
+    .row .masses .m{display:flex;flex-direction:column;gap:1px}
+    .row .masses .m .ml{font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+    .row .masses .m .mv{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-soft);font-weight:600}
+    .row .masses .m .mv.emp{color:#b3bdc7;font-weight:500}
+    .row .st-chip{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--ink-soft);min-width:120px}
+    .row .st-chip .d{width:9px;height:9px;border-radius:50%}
+    .row .pr-chip{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;min-width:104px}
+    .row .pr-chip .d{width:8px;height:8px;border-radius:50%}
+    .row .pr-chip.none{color:var(--muted);font-weight:500}
+    .row .who2{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-soft);min-width:120px}
+    .row .who2 .av{width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent-d);display:grid;place-items:center;font-size:10px;font-weight:700;flex-shrink:0}
+    .row .tags{display:flex;gap:6px}
+    .tag{font-size:10px;font-weight:600;letter-spacing:.03em;padding:3px 8px;border-radius:6px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line-soft)}
+    .tag.k{background:var(--accent-soft);color:var(--accent-d);border-color:transparent}
+    .tag.r{background:#f3e0db;color:var(--danger);border-color:transparent}
+    .groups{display:flex;gap:16px;height:100%;overflow:hidden}
+    .gcol{flex:0 0 256px;background:rgba(255,255,255,.55);border:1px solid var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;min-height:0}
+    .gcol .gh{display:flex;align-items:center;gap:9px;padding:4px 6px 12px;border-bottom:1px dashed var(--line);margin-bottom:12px;flex-shrink:0}
+    .gcol .gh .d{width:11px;height:11px;border-radius:3px}
+    .gcol .gh .t{font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:13px;color:var(--ink-soft)}
+    .gcol .gh .n{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted)}
+    .gcol-scroll{flex:1;overflow-y:auto;min-height:0;position:relative}
+    .gbox{color:#fff;border-radius:8px;padding:10px 12px;height:60px;margin-bottom:9px;cursor:pointer;background:var(--c);position:relative;overflow:hidden;box-shadow:0 2px 8px rgba(20,32,43,.16);transition:.16s}
+    .gbox::before{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(0,0,0,.1) 0 2px,transparent 2px 11px);opacity:.7}
+    .gbox:hover{transform:translateY(-3px)}
+    .gbox.sel{outline:2.5px solid var(--accent);outline-offset:2px}
+    .gbox .pn{position:relative;font-family:"IBM Plex Mono",monospace;font-weight:600;font-size:13px}
+    .gbox .sub{position:relative;font-size:11px;opacity:.9;margin-top:3px;display:flex;justify-content:space-between;gap:6px}
+    .gbox .sub span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .yard-stacks{display:flex;flex-direction:column;gap:22px;position:relative;z-index:1}
+    .stack-block{background:rgba(255,255,255,.5);border:1px solid var(--line);border-radius:14px;padding:12px 14px 14px;transition:.25s}
+    .stack-block.has-hit{background:rgba(255,255,255,.78);border-color:#c4cdc9;box-shadow:0 6px 22px rgba(20,32,43,.10)}
+    .stack-block.aim{animation:aimblock 1.4s ease}
+    @keyframes aimblock{0%,100%{box-shadow:0 6px 22px rgba(20,32,43,.10)}30%{box-shadow:0 0 0 3px var(--accent),0 6px 22px rgba(20,32,43,.18)}}
+    .sb-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+    .sb-title{font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:15px;color:var(--ink-soft);display:flex;align-items:center;gap:9px}
+    .sb-title .blk{width:24px;height:24px;border-radius:7px;background:linear-gradient(150deg,#3a4a59,#27323d);color:#cfe9e2;display:grid;place-items:center;font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600;letter-spacing:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+    .sb-meta{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted)}
+    .stack-block.has-hit .sb-meta{color:var(--accent-d);font-weight:600}
+    .sb-load{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)}
+    .sb-load .bar{width:84px;height:6px;border-radius:999px;background:var(--line-soft);overflow:hidden}
+    .sb-load .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#3a9c8c);border-radius:999px}
+    .sb-body{display:flex;align-items:flex-end;gap:0}
+    .tier-axis{flex:0 0 26px;align-self:flex-end;margin-bottom:var(--ground);position:relative;margin-right:6px}
+    .ta-m{position:absolute;right:0;height:var(--tier-h);display:flex;align-items:center;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:#9aa7b4;letter-spacing:.02em}
+    .sb-row{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;display:inline-flex;align-items:flex-end;gap:8px;padding-bottom:2px;
+    background-image:linear-gradient(transparent,transparent calc(100% - 23px),rgba(70,86,102,.55) calc(100% - 23px),rgba(70,86,102,.55) calc(100% - 21px),transparent calc(100% - 21px));
+    background-repeat:no-repeat}
+    .stack-col{flex:0 0 60px;display:flex;flex-direction:column;align-items:center;transition:.18s}
+    .pile{position:relative;width:50px;filter:drop-shadow(0 4px 5px rgba(20,32,43,.18));border-radius:5px;transition:outline-color .15s}
+    .tier{position:absolute;left:0;right:0;height:var(--tier-h);border-radius:4px;background:var(--c);cursor:grab;
+    display:flex;align-items:center;justify-content:center;gap:3px;overflow:hidden;touch-action:none;user-select:none;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.22),inset 0 -2px 3px rgba(0,0,0,.22),inset 1px 0 0 rgba(255,255,255,.06);
+    transition:filter .28s ease,opacity .28s ease,transform .18s ease,box-shadow .2s ease}
+    .tier::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(0,0,0,.12) 0 1px,transparent 1px 6px);opacity:.55;pointer-events:none}
+    .tier .tn{position:relative;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:rgba(255,255,255,.92);letter-spacing:.02em;white-space:nowrap}
+    .tier .buried{position:relative;display:none;align-items:center;gap:2px;font-family:"IBM Plex Mono",monospace;font-size:8.5px;font-weight:600;color:#fff;background:rgba(0,0,0,.4);border-radius:4px;padding:0 4px;line-height:14px}
+    .tier .buried svg{width:9px;height:9px}
+    .tier:hover{transform:translateY(-2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 4px 10px rgba(20,32,43,.3)}
+    .tier.sel{outline:2.5px solid var(--accent);outline-offset:1px;z-index:3}
+    .tier.hit{transform:translateY(-2px) scale(1.04);z-index:4;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 0 0 2px var(--c),0 0 14px -1px var(--c),0 6px 14px rgba(20,32,43,.3)}
+    .tier.hit .buried{display:flex}
+    .tier.dim{filter:grayscale(.85) brightness(.92);opacity:.32}
+    .tier.dim:hover{transform:none}
+    .empty-slot {
+    position: absolute; left: 0; right: 0; bottom: 0; height: var(--tier-h);
+    border: 1.5px dashed rgba(120,135,150,.55); border-radius: 4px; background: rgba(255,255,255,.28);
+    display: flex; align-items: center; justify-content: center;
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; color: #8593a1;
+    pointer-events: auto; cursor: pointer; transition: all 0.2s; z-index: 2;
+    }
+    .empty-slot:hover {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--accent-d); font-weight: bold;
+    }
+    .tier.dragging{opacity:.28;cursor:grabbing;outline:2px dashed rgba(255,255,255,.85);outline-offset:-3px;z-index:5}
+    .tier.lifted{transform:translate(17px,-9px) rotate(3deg);opacity:.42;filter:saturate(.5) brightness(1.08);z-index:4;box-shadow:0 8px 16px rgba(20,32,43,.3)}
+    .stack-col.drop-target .pile{outline:2px dashed var(--accent);outline-offset:4px}
+    .stack-col.drop-target{transform:translateY(-2px)}
+    .stack-col.drop-target-deny .pile{outline:2px dashed var(--danger);outline-offset:4px}
+    .stack-col.drop-target-deny{transform:translateY(-2px)}
+    .drop-slot{position:absolute;left:-2px;right:-2px;height:var(--tier-h);border:2px dashed var(--accent);border-radius:5px;background:rgba(14,111,99,.16);box-sizing:border-box;pointer-events:none;z-index:6;animation:slotpulse 1s ease-in-out infinite}
+    .drop-slot.deny{border-color:var(--danger);background:rgba(178,58,34,.16);animation:slotdeny .7s ease-in-out infinite}
+    @keyframes slotpulse{0%,100%{background:rgba(14,111,99,.12)}50%{background:rgba(14,111,99,.26)}}
+    @keyframes slotdeny{0%,100%{background:rgba(178,58,34,.12)}50%{background:rgba(178,58,34,.26)}}
+    .drag-ghost{position:fixed;z-index:95;pointer-events:none;left:0;top:0;width:74px;display:flex;flex-direction:column;align-items:center;gap:3px;transform:translate(-50%,-58%) rotate(-4deg)}
+    .drag-ghost .dg-box{width:64px;height:30px;border-radius:5px;background:var(--c);color:#fff;display:flex;align-items:center;justify-content:center;font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;box-shadow:0 12px 26px rgba(20,32,43,.45),inset 0 1px 0 rgba(255,255,255,.25);position:relative;overflow:visible}
+    .drag-ghost .dg-box::after{content:"";position:absolute;inset:0;border-radius:5px;background:repeating-linear-gradient(90deg,rgba(0,0,0,.12) 0 1px,transparent 1px 6px);opacity:.5;pointer-events:none}
+    .drag-ghost.group .dg-box{width:auto;padding:0 10px;gap:6px;background:#27323d}
+    .drag-ghost.group .dg-box .gn{font-family:"Oswald",sans-serif;font-weight:700;font-size:15px}
+    .drag-ghost.deny .dg-box{outline:2px solid var(--danger);outline-offset:1px}
+    .drag-ghost .dg-no{position:absolute;top:-9px;right:-9px;width:22px;height:22px;display:none;filter:drop-shadow(0 2px 4px rgba(0,0,0,.45));z-index:2;animation:nopop .18s ease}
+    .drag-ghost.deny .dg-no{display:block}
+    @keyframes nopop{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+    .marquee{position:fixed;border:1.5px solid var(--accent);background:rgba(14,111,99,.12);border-radius:3px;pointer-events:none;z-index:30;box-shadow:inset 0 0 0 1px rgba(255,255,255,.45)}
+    .tier.marquee-sel{outline:2px solid var(--accent);outline-offset:0;z-index:4;filter:none!important;opacity:1!important;transform:translateY(-1px)}
+    .tier.msel{box-shadow:inset 0 0 0 2px #fff,0 0 0 2px var(--accent),0 0 12px -2px var(--accent);z-index:4}
+    .bay-no{height:18px;margin-top:4px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:#8593a1;display:flex;align-items:center;justify-content:center}
+    .empty{padding:60px 20px;text-align:center;color:var(--muted);position:relative;z-index:1}
+    .empty svg{width:46px;height:46px;opacity:.4;margin-bottom:10px}
+    .scrim{position:fixed;inset:0;background:rgba(15,25,35,.32);opacity:0;visibility:hidden;transition:.25s;z-index:40}
+    .scrim.open{opacity:1;visibility:visible}
+    .drawer{position:fixed;top:0;right:0;height:100vh;width:452px;max-width:94vw;z-index:50;background:var(--surface);box-shadow:var(--shadow-lg);transform:translateX(100%);transition:transform .32s cubic-bezier(.3,.8,.3,1);display:flex;flex-direction:column}
+    .drawer.open{transform:translateX(0)}
+    .dr-head{padding:16px 22px 0;border-bottom:1px solid var(--line);position:relative;overflow:hidden}
+    .dr-head .stripe{position:absolute;left:0;top:0;bottom:0;width:6px;background:var(--c,#888)}
+    .dr-head .topline{display:flex;align-items:center;justify-content:space-between}
+    .dr-head .kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-weight:600}
+    .dr-loc{margin-left:auto;margin-right:8px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);background:var(--surface-2);border:1px solid var(--line-soft);padding:3px 8px;border-radius:6px}
+    .dr-close{background:var(--surface-2);border:1px solid var(--line);width:32px;height:32px;border-radius:9px;cursor:pointer;display:grid;place-items:center;color:var(--muted)}
+    .dr-close:hover{background:#fff;color:var(--ink)}
+    .dr-close svg{width:16px;height:16px}
+    .dr-head .bignum{font-family:"Oswald",sans-serif;font-weight:700;font-size:36px;letter-spacing:.03em;line-height:1;margin-top:8px;display:flex;align-items:center;gap:10px}
+    .dr-head .bignum .pre{color:var(--accent)}
+    .dr-head .bignum .iso{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;color:var(--muted);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:6px;padding:2px 7px;letter-spacing:.02em;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .dr-head .bignum .chk{font-size:22px;color:var(--muted);border:2px solid var(--line);border-radius:6px;padding:0 6px}
+    .dr-head .bignum .chk.bad{color:var(--danger);border-color:var(--danger);background:#fbe9e4}
+    .dr-head .stline{display:flex;align-items:center;gap:14px;margin-top:9px;font-size:12.5px;font-weight:600;color:var(--ink-soft);flex-wrap:wrap}
+    .dr-head .stline .inv,.dr-head .stline .prc{display:flex;align-items:center;gap:7px}
+    .dr-head .stline .d{width:10px;height:10px;border-radius:50%}
+    .dr-head .stline .prc.none{color:var(--muted);font-weight:500}
+    .dr-head .stline .lbl{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+    .dr-tabs{display:flex;gap:2px;margin-top:14px;position:relative;overflow-x:auto}
+    .dr-tabs button{position:relative;border:none;background:none;cursor:pointer;font:inherit;font-size:12px;font-weight:600;color:var(--muted);padding:9px 12px 11px;white-space:nowrap;transition:.15s}
+    .dr-tabs button:hover{color:var(--ink-soft)}
+    .dr-tabs button.on{color:var(--accent-d)}
+    .dr-tabs button.on::after{content:"";position:absolute;left:8px;right:8px;bottom:0;height:2.5px;background:var(--accent);border-radius:3px 3px 0 0;animation:tabin .25s ease}
+    @keyframes tabin{from{transform:scaleX(.3);opacity:0}to{transform:scaleX(1);opacity:1}}
+    .dr-body{flex:1;overflow-y:auto;padding:18px 22px}
+    .tab-pane{display:none;animation:panefade .25s ease}
+    .tab-pane.on{display:block}
+    @keyframes panefade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    .fgrid{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+    .field{display:flex;flex-direction:column;gap:6px}
+    .field.full{grid-column:1/-1}
+    .field label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+    .field label .ro{margin-left:auto;font-size:9px;letter-spacing:.05em;color:#9aa7b4;font-weight:600;display:none}
+    body.role-reader .field label .ro{display:inline}
+    .field input,.field select,.field textarea{font:inherit;font-size:14px;color:var(--ink);padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);transition:.15s;width:100%}
+    .field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px var(--accent-soft)}
+    .field input:disabled,.field select:disabled,.field textarea:disabled{opacity:.62;cursor:not-allowed;background:#eef1f4}
+    .field .ro-val{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-soft);padding:9px 12px;border:1px dashed var(--line);border-radius:10px;background:var(--surface-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .field textarea{resize:vertical;min-height:64px}
+    .toggles{display:flex;flex-direction:column;gap:10px}
+    .tgl{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;border:1px solid var(--line-soft);border-radius:11px;background:var(--surface-2);transition:.2s}
+    .tgl.locked{opacity:.6}
+    .tgl .tt{font-size:13.5px;font-weight:600;color:var(--ink-soft)}
+    .tgl .ts{font-size:11px;color:var(--muted)}
+    .switch{position:relative;width:42px;height:24px;flex-shrink:0}
+    .switch input{opacity:0;width:0;height:0}
+    .switch .sl{position:absolute;inset:0;background:#c2ccd6;border-radius:999px;transition:.2s;cursor:pointer}
+    .switch input:disabled+.sl{cursor:not-allowed;opacity:.6}
+    .switch .sl::before{content:"";position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+    .switch input:checked+.sl{background:var(--accent)}
+    .switch input:checked+.sl::before{transform:translateX(18px)}
+    .switch.warn input:checked+.sl{background:var(--danger)}
+    .weight-info{display:none;align-items:center;gap:9px;padding:9px 12px;border-radius:10px;background:#fbf3e2;border:1px solid #ecd9ad;color:#8a6512;font-size:12px;font-weight:500}
+    .weight-info.show{display:flex}
+    .weight-info svg{width:15px;height:15px;flex-shrink:0}
+    .netto{display:flex;align-items:baseline;gap:8px;padding:9px 12px;border-radius:10px;background:var(--accent-soft);border:1px solid #bfe3da}
+    .netto .nv{font-family:"IBM Plex Mono",monospace;font-size:18px;font-weight:600;color:var(--accent-d)}
+    .netto .nl{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--accent-d);font-weight:600}
+    .netto.emp{background:var(--surface-2);border-color:var(--line-soft)}
+    .netto.emp .nv,.netto.emp .nl{color:var(--muted)}
+    .chain{display:flex;flex-direction:column;gap:0;position:relative;padding-left:6px}
+    .chain .step{display:flex;gap:12px;padding:9px 0;position:relative;animation:panefade .3s ease backwards}
+    .chain .step .rail{flex:0 0 22px;position:relative;display:flex;flex-direction:column;align-items:center}
+    .chain .step .rail .node{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;z-index:1;border:2px solid var(--line);background:#fff;transition:.2s}
+    .chain .step .rail .node svg{width:12px;height:12px;color:#fff;opacity:0}
+    .chain .step .rail .line{flex:1;width:2px;background:var(--line);margin-top:2px}
+    .chain .step:last-child .rail .line{display:none}
+    .chain .step.done .rail .node{background:var(--accent);border-color:var(--accent)}
+    .chain .step.done .rail .node svg{opacity:1}
+    .chain .step.done .rail .line{background:var(--accent)}
+    .chain .step.active .rail .node{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft);animation:led 1.6s infinite}
+    .chain .step.active .rail .node::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--accent)}
+    .chain .step .body{flex:1;padding-top:1px}
+    .chain .step .body .st{font-size:13.5px;font-weight:600;color:var(--ink-soft);display:flex;align-items:center;gap:8px}
+    .chain .step.wait .body .st{color:var(--muted);font-weight:500}
+    .chain .step .body .st .who{font-family:"IBM Plex Mono",monospace;font-size:9.5px;font-weight:600;letter-spacing:.04em;color:var(--muted);background:var(--surface-2);border:1px solid var(--line-soft);padding:1px 6px;border-radius:5px}
+    .chain .step .body .sm{font-size:11px;color:var(--muted);margin-top:2px}
+    .chain .step.active .body .st{color:var(--accent-d)}
+    .docs-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+    .docs-head .dh-t{font-size:12px;color:var(--muted)}
+    .doc{border:1px solid var(--line-soft);border-radius:11px;padding:10px 12px;margin-bottom:9px;background:var(--surface-2);animation:panefade .3s ease}
+    .doc .d-top{display:flex;align-items:center;gap:8px}
+    .doc .d-type{font-size:13px;font-weight:600;color:var(--ink-soft);flex:1;min-width:0}
+    .doc .d-del{background:none;border:none;color:var(--muted);cursor:pointer;padding:2px;border-radius:6px;display:grid;place-items:center}
+    .doc .d-del:hover{color:var(--danger);background:#fbe9e4}
+    .doc .d-del svg{width:14px;height:14px}
+    .doc .d-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+    .doc .d-grid .dg{display:flex;flex-direction:column;gap:3px}
+    .doc .d-grid .dg label{font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:600}
+    .doc .d-grid input,.doc .d-grid select{font:inherit;font-size:12.5px;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink-soft)}
+    .doc .d-grid input:disabled,.doc .d-grid select:disabled{opacity:.6;background:#eef1f4}
+    .doc .carrier-tag{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--ink-soft);background:#fff;border:1px solid var(--line-soft);border-radius:999px;padding:2px 9px;margin-top:8px}
+    .doc .carrier-tag svg{width:11px;height:11px;color:var(--muted)}
+    .doc-add{width:100%;display:flex;align-items:center;justify-content:center;gap:7px;border:1.5px dashed var(--line);background:none;border-radius:11px;padding:10px;font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;transition:.15s}
+    .doc-add:hover{border-color:var(--accent);color:var(--accent-d);background:var(--accent-soft)}
+    .doc-add svg{width:15px;height:15px}
+    .doc-add:disabled{opacity:.5;cursor:not-allowed}
+    .log-meta{font-size:11px;color:var(--muted);padding:8px 11px;border-radius:9px;background:var(--surface-2);border:1px solid var(--line-soft);margin-bottom:11px;display:flex;flex-direction:column;gap:3px}
+    .log-meta b{font-family:"IBM Plex Mono",monospace;color:var(--ink-soft);font-weight:600}
+    .log-meta .ret{font-size:10px;color:#8a6512}
+    .log{display:flex;flex-direction:column;gap:7px}
+    .log .le{border-left:3px solid var(--line);padding:7px 11px;background:var(--surface-2);border-radius:0 9px 9px 0}
+    .log .le .lt{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+    .log .le .lt .u{color:var(--ink-soft);font-weight:600}
+    .log .le .ld{font-size:12.5px;color:var(--ink-soft);margin-top:3px}
+    .log .le .ld .fld{font-weight:600;color:var(--accent-d)}
+    .log .le .ld .from{color:var(--danger);text-decoration:line-through;opacity:.8}
+    .log .le .ld .to{color:var(--accent-d);font-weight:600}
+    .log-empty{font-size:12px;color:var(--muted);padding:8px 2px}
+    .moves{display:flex;flex-direction:column;gap:7px;max-height:340px;overflow-y:auto;padding:2px}
+    .mv{display:flex;flex-direction:column;gap:2px;padding:8px 11px;border:1px solid var(--line-soft);border-radius:9px;background:var(--surface-2)}
+    .mv-time{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--muted)}
+    .mv-route{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-soft);font-weight:600}
+    .mv-route .arr{color:var(--accent);margin:0 5px}
+    .mv-empty{font-size:12px;color:var(--muted);padding:8px 2px}
+    .dr-foot{padding:13px 22px;border-top:1px solid var(--line);display:flex;gap:10px;background:var(--surface)}
+    .dr-foot .btn{flex:1;justify-content:center}
+    .dr-foot .ro-note{flex:1;display:none;align-items:center;justify-content:center;gap:7px;font-size:12.5px;color:var(--muted)}
+    body.role-reader .dr-foot .btn{display:none}
+    body.role-reader .dr-foot .ro-note{display:flex}
+    .dr-foot .ro-note svg{width:15px;height:15px}
+    .bulk-bar{position:fixed;left:50%;bottom:22px;transform:translate(-50%,160%);z-index:70;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    background:var(--ink);color:#fff;padding:11px 14px;border-radius:15px;box-shadow:var(--shadow-lg);max-width:94vw;transition:transform .34s cubic-bezier(.2,.85,.25,1)}
+    .bulk-bar.show{transform:translate(-50%,0)}
+    .bb-count{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;padding-right:4px}
+    .bb-count b{font-family:"IBM Plex Mono",monospace;font-size:15px;color:#7fe6cf;min-width:18px;text-align:right}
+    .bb-count .sq{width:13px;height:13px;border-radius:3px;background:var(--accent);box-shadow:0 0 0 2px rgba(127,230,207,.35)}
+    .bb-sep{width:1px;align-self:stretch;background:rgba(255,255,255,.16);margin:2px 2px}
+    .bb-f{display:flex;flex-direction:column;gap:3px;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.55);font-weight:600}
+    .bb-f select{font-family:"IBM Plex Sans",sans-serif;font-size:12.5px;text-transform:none;letter-spacing:0;color:#fff;background:#2a3744;border:1px solid rgba(255,255,255,.16);border-radius:8px;padding:6px 9px;cursor:pointer;min-width:118px}
+    .bb-f select:focus{outline:none;border-color:#7fe6cf}
+    .bb-f select.touched{border-color:#7fe6cf;background:#234}
+    .bb-apply{padding:9px 16px;border-radius:10px}
+    .bb-apply:disabled{opacity:.5;cursor:not-allowed}
+    .bb-close{width:34px;height:34px;border-radius:9px;border:1px solid rgba(255,255,255,.18);background:transparent;color:rgba(255,255,255,.7);cursor:pointer;display:grid;place-items:center;flex-shrink:0;transition:.15s}
+    .bb-close:hover{background:rgba(255,255,255,.12);color:#fff}
+    .bb-close svg{width:16px;height:16px}
+    .ax-scrim{position:fixed;inset:0;background:rgba(15,25,35,.42);opacity:0;visibility:hidden;transition:.25s;z-index:60}
+    .ax-scrim.open{opacity:1;visibility:visible}
+    .analytics{position:fixed;top:50%;left:50%;transform:translate(-50%,-46%) scale(.97);z-index:61;width:min(960px,94vw);max-height:86vh;background:var(--surface);border-radius:18px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;opacity:0;visibility:hidden;transition:.28s cubic-bezier(.3,.8,.3,1)}
+    .analytics.open{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
+    .ax-head{display:flex;align-items:center;gap:12px;padding:18px 22px;border-bottom:1px solid var(--line)}
+    .ax-head h2{font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:18px;margin:0;color:var(--ink-soft)}
+    .ax-head .ax-sub{font-size:12px;color:var(--muted)}
+    .ax-head .ax-plan{margin-left:6px;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:600;letter-spacing:.08em;color:#7a4d00;background:#ffe9b8;border:1px solid #e0b25a;padding:2px 8px;border-radius:999px;display:none}
+    .analytics.in-plan .ax-plan{display:inline-block}
+    .ax-close{margin-left:auto;background:var(--surface-2);border:1px solid var(--line);width:34px;height:34px;border-radius:9px;cursor:pointer;display:grid;place-items:center;color:var(--muted)}
+    .ax-close:hover{background:#fff;color:var(--ink)}
+    .ax-close svg{width:16px;height:16px}
+    .ax-body{flex:1;overflow-y:auto;padding:20px 22px;display:grid;grid-template-columns:1.5fr 1fr;gap:18px}
+    .ax-card{border:1px solid var(--line-soft);border-radius:14px;padding:14px 16px;background:var(--surface-2)}
+    .ax-card h3{font-family:"Oswald",sans-serif;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:12.5px;color:var(--muted);margin:0 0 12px;display:flex;align-items:center;gap:8px}
+    .ax-card h3 .q{margin-left:auto;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-soft)}
+    .ax-right{display:flex;flex-direction:column;gap:18px;min-width:0}
+    .heat-row{display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px;cursor:pointer;transition:.15s}
+    .heat-row:hover{background:#fff;box-shadow:var(--shadow)}
+    .heat-row .hb{width:22px;height:22px;border-radius:6px;background:linear-gradient(150deg,#3a4a59,#27323d);color:#cfe9e2;display:grid;place-items:center;font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;flex-shrink:0}
+    .heat-row .hbar{flex:1;height:9px;border-radius:999px;background:var(--line-soft);overflow:hidden;min-width:40px}
+    .heat-row .hbar i{display:block;height:100%;width:0;border-radius:999px;transition:width .7s cubic-bezier(.2,.8,.25,1)}
+    .heat-row .hpct{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-soft);width:42px;text-align:right;flex-shrink:0}
+    .bn-list{display:flex;flex-direction:column;gap:7px;max-height:230px;overflow-y:auto}
+    .bn{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:9px;background:#fff;border:1px solid var(--line-soft)}
+    .bn .sw{width:11px;height:11px;border-radius:3px;flex-shrink:0}
+    .bn .bn-id{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600;color:var(--ink);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .bn .bn-cost{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--danger);background:#fbe9e4;padding:2px 7px;border-radius:999px;flex-shrink:0}
+    .hist{display:flex;align-items:flex-end;gap:8px;height:96px;padding-top:6px}
+    .hist .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end}
+    .hist .col .bar{width:100%;border-radius:6px 6px 3px 3px;transition:height .7s cubic-bezier(.2,.8,.25,1);min-height:2px}
+    .hist .col .cl{font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--muted)}
+    .hist .col .cv{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-soft);font-weight:600}
+    .ax-empty{font-size:12px;color:var(--muted);padding:10px 2px}
+    .toast{position:fixed;bottom:24px;left:50%;transform:translate(-50%,140%);z-index:90;background:var(--ink);color:#fff;padding:12px 18px;border-radius:12px;font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow-lg);transition:transform .35s cubic-bezier(.2,.8,.3,1);max-width:90vw}
+    .toast.show{transform:translate(-50%,0)}
+    .toast svg{width:18px;height:18px;color:#5fd6b6;flex-shrink:0}
+    .toast .ic-warn{display:none}
+    .toast.warn .ic-ok{display:none}
+    .toast.warn .ic-warn{display:block;color:#ff9a82}
+    @keyframes led{0%,100%{box-shadow:0 0 0 3px rgba(0,0,0,.18)}50%{box-shadow:0 0 0 3px rgba(0,0,0,.18),0 0 0 7px rgba(255,255,255,.35)}}
+    ::-webkit-scrollbar{width:10px;height:10px}
+    ::-webkit-scrollbar-thumb{background:#bcc6d0;border-radius:999px;border:2px solid transparent;background-clip:padding-box}
+    ::-webkit-scrollbar-thumb:hover{background:#9aa7b4;background-clip:padding-box}
+    .sb-row::-webkit-scrollbar,.ur-track::-webkit-scrollbar,.dr-tabs::-webkit-scrollbar{height:8px}
+    @media(max-width:980px){.stat-pill.proc{display:none}}
+    @media(max-width:880px){.sidebar{display:none}.stat-pill.inv{display:none}.ax-body{grid-template-columns:1fr}.role-seg .who{display:none}}
+    /* Стили для Drag & Drop в группах */
+    .gbox[draggable="true"] {
+        cursor: grab;
+    }
+    .gbox.dragging {
+        opacity: 0.5;
+        cursor: grabbing;
+    }
+    .gcol.drag-over {
+        background: rgba(14, 111, 99, 0.1); /* Подсветка колонки при наведении */
+        border-color: var(--accent);
+        box-shadow: inset 0 0 0 2px var(--accent-soft);
+    }
+    .gcol.drag-over .gcol-scroll {
+        /* Можно добавить эффект, если нужно */
+    }
+    .gbox.bulk-sel {
+        outline: 3px solid var(--accent);
+        outline-offset: -2px;
+        transform: scale(0.98);
+        box-shadow: 0 0 15px rgba(14, 111, 99, 0.4);
+    }
+    /* --- Custom Combobox Styles --- */
+.combobox {
+    position: relative;
+    width: 100%;
+}
+.combobox input {
+    width: 100%;
+    padding-right: 30px; /* Место для стрелки */
+}
+.combobox .arrow {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none; /* Чтобы клик проходил сквозь стрелку в input */
+    color: var(--muted);
+    width: 14px;
+    height: 14px;
+}
+.combobox .options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none; /* Скрыт по умолчанию */
+    margin-top: -2px; /* Наложение на границу инпута */
+}
+.combobox.open .options {
+    display: block;
+}
+.combobox .option {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--ink);
+}
+.combobox .option:hover {
+    background: var(--accent-soft);
+    color: var(--accent-d);
+}
+.combobox .option.selected {
+    background: var(--surface-2);
+    font-weight: 600;
+}
+  </style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="1.5"/><path d="M6 6v12M10 6v12M14 6v12M18 6v12"/></svg></div>
+      <div><h1>Справочник контейнеров</h1><small>АИС «Техконтроль» · модуль учёта</small></div>
+    </div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+      <input id="search" type="text" placeholder="Поиск по префиксу или номеру…  напр. NMKU 6187050" />
+    </div>
+    <div class="spacer"></div>
+    <div class="stat-pill inv"><span class="dot"></span>В обороте <b id="cnt-inuse">0</b></div>
+    <div class="stat-pill inv">Требуют внимания <b id="cnt-alert" style="color:var(--danger)">0</b></div>
+    <div class="stat-pill proc" title="Стадии груза в производственном контуре">
+      <span class="pc"><span class="d" style="background:var(--pr-weigh)"></span>поступление <b id="cnt-a">0</b></span>
+      <span class="pc"><span class="d" style="background:var(--pr-weigh)"></span>взвешивание <b id="cnt-w">0</b></span>
+      <span class="pc"><span class="d" style="background:var(--pr-store)"></span>хранение <b id="cnt-s">0</b></span>
+      <span class="pc"><span class="d" style="background:var(--pr-ship)"></span>отгрузка <b id="cnt-h">0</b></span>
+    </div>
+    <div class="stat-pill" id="srcPill" title="Источник данных">…</div>
+    <div class="role-seg" title="Роль имитирует платформенную роль АИС ТК">
+      <span class="rl">Роль</span>
+      <span class="opts" id="roleOpts">
+<button data-role="reader">Чтение</button>
+<button data-role="editor" class="on">Запись</button>
+<button data-role="admin">Админ</button>
+</span>
+      <span class="who" id="roleWho"></span>
+    </div>
+    <button class="btn" id="newBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>Новый</button>
+  </header>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-head"><h2>Фильтры</h2><button class="reset" id="resetBtn">Сбросить</button></div>
+      <div class="facet" id="facet-state"><div class="label">Состояние (инвентарь)</div></div>
+      <div class="facet" id="facet-proc"><div class="label">Статус операции</div></div>
+      <div class="facet" id="facet-type"><div class="label">Тип контейнера</div></div>
+      <div class="facet" id="facet-own"><div class="label">Собственность</div></div>
+    </aside>
+    <main class="yard-wrap">
+      <div class="yard-bar">
+        <div class="seg" id="viewSeg">
+          <button data-view="yard" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/></svg>Площадка</button>
+          <button data-view="list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>Реестр</button>
+          <button data-view="groups"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="11" rx="1"/><rect x="17" y="4" width="4" height="14" rx="1"/></svg>Группы</button>
+          <button data-view="stacks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="14" width="7" height="6" rx="1"/><rect x="3" y="7" width="7" height="6" rx="1"/><rect x="13" y="14" width="8" height="6" rx="1"/><rect x="13" y="9" width="8" height="4" rx="1"/><rect x="13" y="4" width="8" height="4" rx="1"/></svg>Штабели</button>
+        </div>
+        <div class="count">Показано <b id="shown">0</b> из <b id="total">0</b></div>
+        <span class="hint-drag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 9 2 12l3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg>тяни ярус · рамкой по фону — выделить группу</span>
+        <span class="yard-hint" id="yardHint">раскладка двора — демонстрационная (координаты в БД не заданы)</span>
+        <div class="spacer"></div>
+        <button class="btn-toggle" id="analyticsBtn" title="Аналитика двора"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="6"/><rect x="12" y="7" width="3" height="10"/><rect x="17" y="13" width="3" height="4"/></svg>Сводка</button>
+        <button class="btn-toggle" id="planBtn" title="Режим планирования (песочница)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19"/><circle cx="12" cy="12" r="3.2"/></svg>План</button>
+        <button class="btn-toggle" id="cancelPlanBtn" style="display:none; border-color: #ffd98a; color: #937d50;" title="Сохранить изменения и выйти из плана">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>Сохранить план
+        </button>
+        <button class="btn-icon disabled" id="undoBtn" title="Отменить последнее перемещение">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-4"/></svg>
+          <span class="ub" id="undoBadge"></span>
+        </button>
+        <button class="btn-icon disabled" id="redoBtn" title="Повторить отменённое перемещение">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h4"/></svg>
+        </button>
+        <div class="sort" id="sortCtl">Сортировка
+          <select id="sortSel">
+            <option value="num">По номеру</option>
+            <option value="state">По состоянию</option>
+            <option value="proc">По статусу операции</option>
+            <option value="weight">По брутто ↓</option>
+          </select>
+        </div>
+      </div>
+      <div class="undo-rail" id="undoRail">
+        <span class="ur-cap">Смена</span>
+        <div class="ur-track" id="urTrack"><div class="ur-line"></div></div>
+      </div>
+      <div class="plan-flag"><span class="pd"></span>Режим плана · изменения не в факте</div>
+      <div class="yard" id="yard"></div>
+      <div class="yard-legend" id="yardLegend"></div>
+    </main>
+  </div>
+</div>
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dr-head">
+    <div class="stripe"></div>
+    <div class="topline"><span class="kicker">Карточка контейнера</span><span class="dr-loc" id="d-loc" style="display:none"></span>
+      <button class="dr-close" id="drDelete" style="margin-right: 8px; color: var(--danger); border-color: #f3e0db;" title="Удалить контейнер">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+      </button>
+      <button class="dr-close" id="drClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="bignum"><span class="pre" id="d-pre">NMKU</span><span id="d-num">000000</span><span class="iso" id="d-iso">—</span><span class="chk" id="d-chk">0</span></div>
+    <div class="stline">
+      <span class="inv"><span class="lbl">инв.</span><span class="d" id="d-st-dot"></span><span id="d-st-name">—</span></span>
+      <span class="prc none" id="d-prc-wrap"><span class="lbl">опер.</span><span class="d" id="d-prc-dot" style="display:none"></span><span id="d-prc-name">не в операции</span></span>
+    </div>
+    <div class="dr-tabs" id="drTabs">
+      <button data-tab="data" class="on">Данные</button>
+      <button data-tab="chain">Цепочка операции</button>
+      <button data-tab="docs">Документы</button>
+      <button data-tab="log">Журнал изменений</button>
+      <button data-tab="moves">Перемещения</button>
+    </div>
+  </div>
+  <div class="dr-body">
+    <div class="tab-pane on" data-pane="data">
+      <div class="fgrid">
+        <div class="field">
+          <label>Префикс <span class="ro">чтение</span></label>
+          <div class="combobox" id="cb-prefix">
+            <input type="text" id="f-pre" data-w maxlength="4" style="text-transform:uppercase" placeholder="NMKU" autocomplete="off">
+            <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+            <div class="options" id="list-prefix"></div>
+          </div>
+        </div>
+        <div class="field"><label>Номер контейнера <span class="ro">чтение</span></label><input id="f-num" data-w maxlength="7" inputmode="numeric"/></div>
+        <div class="field">
+          <label>Тип контейнера <span class="ro">чтение</span></label>
+          <div class="combobox" id="cb-type">
+            <input type="text" id="f-type" data-w placeholder="ИСО-Х1" autocomplete="off">
+            <svg class="arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+            <div class="options" id="list-type"></div>
+          </div>
+        </div>
+
+        <!-- ISO Code -->
+        <div class="field">
+          <label>ISO code <span class="ro">чтение</span></label>
+          <input id="f-iso" data-w maxlength="4" placeholder="22G1" style="text-transform:uppercase" />
+        </div>
+        <div class="field"><label>Вес по трафарету, кг (пасп.) <span class="ro">чтение</span></label><input id="f-pw" data-w type="number" inputmode="numeric"/></div>
+        <div class="field"><label>Тара факт., кг (взвеш. порожнего) <span class="ro">чтение</span></label><input id="f-tare" data-w type="number" inputmode="numeric" placeholder="—"/></div>
+        <div class="field"><label>Брутто, кг (взвеш. гружёного) <span class="ro">чтение</span></label><input id="f-gross" data-w type="number" inputmode="numeric" placeholder="—"/></div>
+        <div class="field"><label>Повторное взвешивание, кг <span class="ro">чтение</span></label><input id="f-grep" data-w type="number" inputmode="numeric" placeholder="—"/></div>
+        <div class="field full"><div class="netto emp" id="f-netto"><span class="nl">Нетто груза (брутто − тара)</span><span class="nv">—</span></div></div>
+        <div class="field full"><div class="weight-info" id="w-info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9.2"/><line x1="12" y1="7.5" x2="12" y2="13" stroke-linecap="round"/><line x1="12" y1="16.4" x2="12" y2="16.5" stroke-linecap="round"/></svg><span id="w-info-txt"></span></div></div>
+        <div class="field"><label>Состояние контейнера <span class="ro">чтение</span></label><select id="f-state" data-w></select></div>
+        <div class="field"><label>Статус операции <span class="ro">чтение</span></label><select id="f-proc" data-w></select></div>
+        <div class="field"><label>Ответственный <span class="ro">чтение</span></label><select id="f-owner" data-w></select></div>
+        <div class="field"><label>Груз / партия</label><div class="ro-val" id="f-cargo">ссылка на модуль учёта продукции →</div></div>
+        <div class="field full"><div class="toggles">
+          <div class="tgl" id="tgl-kgmk"><div><div class="tt">Собственность КГМК</div><div class="ts">Балансовая принадлежность комбинату</div></div><label class="switch"><input type="checkbox" id="f-kgmk" data-w><span class="sl"></span></label></div>
+          <div class="tgl" id="tgl-ret"><div><div class="tt">Выведен из оборота</div><div class="ts">Списан / не используется · только администратор</div></div><label class="switch warn"><input type="checkbox" id="f-ret" data-w data-admin><span class="sl"></span></label></div>
+        </div></div>
+        <div class="field full"><label>Примечания <span class="ro">чтение</span></label><textarea id="f-note" data-w placeholder="Дефекты, история ремонтов, особенности…"></textarea></div>
+      </div>
+    </div>
+    <div class="tab-pane" data-pane="chain"><div class="chain" id="chainList"></div></div>
+    <div class="tab-pane" data-pane="docs">
+      <div class="docs-head"><span class="dh-t" id="docs-count"></span></div>
+      <div id="docsList"></div>
+      <button class="doc-add" id="docAdd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>Добавить документ</button>
+    </div>
+    <div class="tab-pane" data-pane="log">
+      <div class="log-meta" id="logMeta"></div>
+      <div class="log" id="logList"></div>
+    </div>
+    <div class="tab-pane" data-pane="moves"><div class="moves" id="f-moves"></div></div>
+  </div>
+  <div class="dr-foot">
+    <button class="btn ghost" id="drCancel">Отмена</button>
+    <button class="btn" id="drSave"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg>Сохранить</button>
+    <span class="ro-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Режим чтения · запись недоступна для роли</span>
+  </div>
+</aside>
+<div class="bulk-bar" id="bulkBar">
+  <span class="bb-count"><span class="sq"></span><b id="bb-n">0</b> ярусов</span>
+  <span class="bb-sep"></span>
+  <label class="bb-f">Состояние<select id="bb-state"></select></label>
+  <label class="bb-f">Статус опер.<select id="bb-proc"></select></label>
+  <label class="bb-f">Ответственный<select id="bb-owner"></select></label>
+  <label class="bb-f">КГМК<select id="bb-kgmk"><option value="">— не менять —</option><option value="1">Да</option><option value="0">Нет</option></select></label>
+  <button class="btn bb-apply" id="bb-apply">Применить</button>
+  <button class="bb-close" id="bb-close" title="Снять выделение"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+</div>
+<div class="ax-scrim" id="axScrim"></div>
+<div class="analytics" id="analytics" aria-hidden="true">
+  <div class="ax-head">
+    <h2>Сводка двора</h2><span class="ax-sub" id="ax-sub"></span><span class="ax-plan">ПЛАН</span>
+    <button class="ax-close" id="axClose"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="ax-body">
+    <div class="ax-card" id="axHeat">
+      <h3>Тепловая карта секций <span class="q" id="ax-heat-q"></span></h3>
+      <div id="ax-heat-list"></div>
+    </div>
+    <div class="ax-right">
+      <div class="ax-card">
+        <h3>Узкие места — снимать в первую очередь <span class="q" id="ax-bn-q"></span></h3>
+        <div class="bn-list" id="ax-bn-list"></div>
+      </div>
+      <div class="ax-card">
+        <h3>Запас до лимита высоты <span class="q">штабелей</span></h3>
+        <div class="hist" id="ax-hist"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast">
+  <svg class="ic-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+  <svg class="ic-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9.2"/><line x1="12" y1="7.5" x2="12" y2="13" stroke-linecap="round"/><line x1="12" y1="16.4" x2="12" y2="16.5" stroke-linecap="round"/></svg>
+  <span id="toast-txt">Сохранено</span>
+</div>
+<!-- Модальное окно выбора контейнера -->
+<div class="scrim" id="slotScrim" style="z-index: 60; display: none;"></div>
+<div class="analytics" id="slotPicker" style="width: min(600px, 94vw); height: 80vh; z-index: 61; display: none; flex-direction: column;">
+  <div class="ax-head">
+    <h2>Установка в ячейку</h2>
+    <span class="ax-sub" id="slotTargetInfo">Цель: Секция A · Ряд 01 · Ярус 1</span>
+    <button class="ax-close" id="slotPickerCloseBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+  </div>
+  <div class="ax-body" style="display: flex; flex-direction: column; gap: 15px; padding: 20px; overflow: hidden;">
+    <div class="search" style="max-width: 100%; width: 100%; position: relative;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="position: absolute; left: 13px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; color: var(--muted);"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+      <input id="slotSearchInput" type="text" placeholder="Поиск по номеру (напр. NMKU 618...)" style="width: 100%; padding: 12px 12px 12px 40px; border: 1px solid var(--line); border-radius: 8px; font-size: 16px; box-sizing: border-box;" />
+    </div>
+    <div id="slotResultsList" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 5px;">
+      <div style="text-align: center; color: var(--muted); padding: 20px;">Введите номер для поиска контейнера в БД...</div>
+    </div>
+  </div>
+</div>
+<script th:inline="none">
+  /* ============================================================
+  СПРАВОЧНИКИ (Загружаются с бэкенда)
+  ============================================================ */
+  let STATES = {
+  inuse: { name: "Удовлетворительное", color: "var(--st-inuse)", hex: "#2f6b4f", pulse: false },
+  damaged: { name: "Брак", color: "var(--st-damaged)", hex: "#9c3b22", pulse: true },
+  };
+  let OWNERS = []; // Будет заполнено из API
+  let PREFIXES = []; // Будет заполнено из API
+  let PROC = { arrival: { name: "Поступление", color: "var(--pr-arrival)", hex: "#3a8a63" }, weighing: { name: "Взвешивание", color: "var(--pr-weigh)", hex: "#1f6b8a" }, storage: { name: "Хранение", color: "var(--pr-store)", hex: "#7a5a1e" }, shipment: { name: "Отгрузка", color: "var(--pr-ship)", hex: "#5a3a8a" } };
+  const TYPE_BLACKLIST = new Set(["что-от", "что-от"]);
+  let PLAN_DATA = new Map();
+
+  let draggedGroupId = null;
+
+  let GLOBAL_STATS = {};
+
+  function isJunkType(cap) {
+    const c = (cap || "").trim().toLowerCase();
+    return !c || TYPE_BLACKLIST.has(c);
+  }
+
+  async function loadStats() {
+    try {
+        const res = await fetch(`${API_BASE}/containers/stats`);
+        if (res.ok) {
+            GLOBAL_STATS = await res.json();
+        }
+    } catch (e) {
+        console.warn("Не удалось загрузить глобальную статистику", e);
+    }
+  }
+
+  function statNum(key, fallback = 0) {
+    const v = GLOBAL_STATS[key];
+    return v !== undefined && v !== null ? Number(v) : fallback;
+  }
+
+  function hasGlobalStats() {
+    return GLOBAL_STATS && Object.keys(GLOBAL_STATS).length > 0;
+  }
+
+  async function refreshFacets() {
+    await loadStats();
+    buildFacets();
+    updateTopCounters();
+  }
+
+  function updateTopCounters() {
+    const inuseLocal = DATA.filter(d => d.state === "inuse").length;
+    const damagedLocal = DATA.filter(d => d.state === "damaged").length;
+    const arrivalLocal = DATA.filter(d => d.state === "arrival").length;
+    const weighingLocal = DATA.filter(d => d.state === "weighing").length;
+    const storageLocal = DATA.filter(d => d.state === "storage").length;
+    const shipmentLocal = DATA.filter(d => d.state === "shipment").length;
+
+    animateNumber($("#cnt-inuse"), statNum("state_inuse", inuseLocal));
+    animateNumber($("#cnt-a"), statNum("proc_arrival", arrivalLocal));
+    animateNumber($("#cnt-w"), statNum("proc_weighing", weighingLocal));
+    animateNumber($("#cnt-s"), statNum("proc_storage", storageLocal));
+    animateNumber($("#cnt-h"), statNum("proc_shipment", shipmentLocal));
+    animateNumber($("#cnt-alert"), statNum("state_damaged", damagedLocal));
+  }
+
+
+async function loadPlansFromServer() {
+    try {
+        const res = await fetch(`${API_BASE}/containers/plans`);
+        if (res.ok) {
+            const plans = await res.json();
+            PLAN_DATA.clear();
+            plans.forEach(p => {
+                // p - это ContainerDto, у него есть id, block, bay, tier
+                PLAN_DATA.set(p.id, { block: p.block, bay: p.bay, tier: p.tier });
+            });
+        }
+    } catch (e) {
+        console.error("Ошибка загрузки планов", e);
+    }
+}
+
+async function enterPlan() {
+    if (planMode || !canWrite()) return;
+
+    // 1. Сохраняем чистый факт (глубокая копия)
+    factData = JSON.parse(JSON.stringify(DATA));
+
+    // 2. Загружаем планы с сервера
+    try {
+        const res = await fetch(`${API_BASE}/containers/plans`);
+        if (res.ok) {
+            const plans = await res.json();
+            PLAN_DATA.clear();
+
+            // Накладываем планы на текущие данные (DATA)
+            // Важно: мы меняем координаты в DATA, чтобы рендер показал ПЛАН
+            plans.forEach(p => {
+                // Сохраняем в кэш
+                PLAN_DATA.set(p.id, { block: p.block, bay: p.bay, tier: p.tier });
+
+                // Находим контейнер в DATA и меняем ему координаты
+                const container = DATA.find(d => d.id === p.id);
+                if (container) {
+                    container.block = p.block;
+                    container.bay = p.bay;
+                    container.tier = p.tier;
+                }
+            });
+        }
+    } catch (e) {
+        console.warn("Ошибка загрузки планов, начинаем с факта", e);
+    }
+
+    planUndo.length = 0;
+    planRedo.length = 0;
+    planMode = true;
+
+    yardWrap.classList.add("plan-mode");
+    yard.classList.add("plan-mode");
+
+    // Меняем вид кнопки
+    const btn = $("#planBtn");
+    btn.classList.add("plan-on");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 6 9 17l-5-5"/></svg>Фактическое сохранение`;
+    btn.title = "Сохранить изменения фактические";
+
+    // Показываем кнопку отмены (если ты её добавил в HTML)
+    const cancelBtn = $("#cancelPlanBtn");
+    if(cancelBtn) cancelBtn.style.display = "inline-flex";
+
+    toast("Режим плана активен. Загружены черновики.");
+    render(false);
+}
+
+
+
+  const DEMO_TYPES = ["ИСО-1CX-SG", "ИСО-1CX обычный", "СК-3-30Д", "ИСО-1CC-SG", "ИСО-1CX", "ИСО-1CC", "ИСО-1CC без КБК"];
+  function typeAttrs(caption) {
+  const c = (caption || "").toUpperCase();
+  if (c.includes("40") || c.includes("HC") || c.includes("1AX")) return { pw: 3900, maxStack: 7 };
+  if (c.includes("РЕФР") || c.includes("R1")) return { pw: 3050, maxStack: 7 };
+  if (c.includes("ТАНК") || c.includes("T1")) return { pw: 3600, maxStack: 7 };
+  if (c.includes("OPEN") || c.includes("U1") || c.includes("OT")) return { pw: 2350, maxStack: 7 };
+  return { pw: 2300, maxStack: 7 };
+  }
+
+  const procName = k => PROC[k] ? PROC[k].name : "";
+  const DOC_TYPES = { weighing: "Акт взвешивания", reweigh: "Акт перевески", msm: "Общий список МСМ", accompanying: "Сопроводительные документы", quality: "Документы о качестве", shipping: "Отгрузочные документы" };
+  const DOC_CARRIERS = { paper: "Бумажный носитель", share: "Сетевая папка (Общий список МСМ)", email: "Электронная почта", xml: "XML" };
+  const DOC_DEF_CARRIER = { weighing: "email", reweigh: "email", msm: "share", accompanying: "paper", quality: "paper", shipping: "paper" };
+  const CARRIER_ICON = { paper: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6", share: "M4 22V4a2 2 0 0 1 2-2h8l6 6v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", email: "M4 4h16v16H4z M4 6l8 6 8-6", xml: "M8 7l-5 5 5 5 M16 7l5 5-5 5" };
+  const FIELD_LABELS = { prefix: "Префикс", number: "Номер", pw: "Вес по трафарету", tareFact: "Тара факт.", gross: "Брутто", grossRepeat: "Повторное взвешивание", state: "Состояние", procState: "Статус операции", owner: "Ответственный", kgmk: "Собственность КГМК", retired: "Выведен из оборота", note: "Примечания" };
+  const CURRENT_USER = "Сидорова Е.Н.";
+  const HARD_MAX = 7;
+  function tierLimitByItem(d) { return Math.min(HARD_MAX, typeAttrs(typeLabel(d)).maxStack); }
+  const ISO_VAL = {};
+  (function () { let v = 10; for (let c = 65; c <= 90; c++) { if (v % 11 === 0) v++; ISO_VAL[String.fromCharCode(c)] = v++; } })();
+  function checkDigit(prefix, serial6) {
+  const s = (prefix + serial6).toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  let sum = 0; for (let i = 0; i < s.length; i++) { const ch = s[i]; const val = (ch >= "0" && ch <= "9") ? +ch : (ISO_VAL[ch] || 0); sum += val * Math.pow(2, i); }
+  let r = sum % 11; if (r === 10) r = 0; return r;
+  }
+  function computedCheck(it) { return checkDigit(it.prefix, (it.number || "").slice(0, 6)); }
+
+  /* ---------- генератор (демо-фолбэк) ---------- */
+  const STATE_POOL = [];
+  Object.entries({ inuse: 45, free: 25, repair: 12, damaged: 8, retired: 10 }).forEach(([k, n]) => { for (let i = 0; i < n; i++)STATE_POOL.push(k); });
+  const PROC_POOL = ["", "weighing", "storage", "storage", "shipment", "shipment", "arrival"];
+  const H_POOL = [1, 2, 2, 3, 3, 3, 4, 4, 5];
+  function rnd(a) { return a[Math.floor(Math.random() * a.length)]; }
+  function rndInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+  let LAYOUT = new Map();
+  function buildPlan(n) {
+  const NAMES = "ABCDEFGHJKLMNPRT";
+  const layout = new Map(); const slots = []; let bi = 0;
+  while (slots.length < n && bi < NAMES.length + 8) {
+  const name = bi < NAMES.length ? NAMES[bi] : ("B" + (bi - NAMES.length + 1));
+  const baysCount = 24 + (bi % 5) * 2; const bays = [];
+  for (let b = 1; b <= baysCount; b++) {
+  bays.push(b);
+  if (b === baysCount) continue;
+  const h = rnd(H_POOL);
+  for (let t = 1; t <= h; t++)slots.push({ block: name, bay: b, tier: t });
+  }
+  layout.set(name, { bays: bays }); bi++;
+  }
+  return { slots: slots.slice(0, n), layout };
+  }
+  function genData(N) {
+  const { slots, layout } = buildPlan(N); LAYOUT = layout;
+  const blocksArr = [...layout.keys()];
+  const out = []; let serial = 6180000; const DAY = 86400000; const now = Date.now();
+  // Используем загруженные справочники или фолбэк
+  const localPrefixes = PREFIXES.length ? PREFIXES : ["NMKU", "TRLU", "MSKU"];
+  const localOwners = OWNERS.length ? OWNERS.map(o => o.fullName) : ["Иванов А.С.", "Петров В.И."];
+
+  for (let i = 0; i < N; i++) {
+  const prefix = rnd(localPrefixes); const typeLegacy = rnd(DEMO_TYPES); const pw = typeAttrs(typeLegacy).pw; const state = rnd(STATE_POOL);
+  serial += 1 + Math.floor(Math.random() * 7);
+  const s6 = String(serial).slice(-6); const cd = checkDigit(prefix, s6);
+  const valid = Math.random() > 0.08;
+  const last = valid ? cd : ((cd + 1 + Math.floor(Math.random() * 8)) % 10);
+  const number = s6 + last;
+  const proc = state === "retired" ? "" : rnd(PROC_POOL);
+  const createdAt = now - rndInt(30, 420) * DAY;
+  let tareFact = null, gross = null, grossRepeat = null;
+  if (proc === "weighing") { if (Math.random() < 0.5) tareFact = pw + rndInt(-30, 30); }
+  else if (proc !== "") { tareFact = pw + rndInt(-30, 30); }
+  if (proc === "storage" || proc === "shipment") { if (tareFact == null) tareFact = pw + rndInt(-30, 30); gross = tareFact + rndInt(5000, 21000); if (Math.random() < 0.5) grossRepeat = gross + rndInt(-45, 45); }
+  const docs = [];
+  const changeLog = [];
+  const updatedAt = createdAt;
+  const moveLog = [];
+  out.push({
+  id: i + 1, prefix, number, iso: "", typeLegacy, pw, tareFact, gross, grossRepeat,
+  state, procState: proc, owner: rnd(localOwners), kgmk: Math.random() > 0.4, retired: state === "retired",
+  block: slots[i].block, bay: slots[i].bay, tier: slots[i].tier,
+  docs, moveLog, changeLog, createdAt, updatedAt, note: ""
+  });
+  }
+  return out;
+  }
+
+  /* ============================================================
+  ЗАГРУЗКА ДАННЫХ: API + INFINITE SCROLL
+  ============================================================ */
+  let DATA = []; let dataSource = "demo";
+  const API_BASE = "http://172.27.93.55:8888/api";
+  const pagination = { page: 0, size: 100, totalElements: 0, isLoading: false, hasMore: true };
+  let ALL_TYPES = [];
+  // ИСПРАВЛЕННЫЙ mapDto
+  function mapDto(x) {
+      return {
+          id: x.id,
+          prefix: x.prefix || "",
+          number: String(x.numContainer ?? "").padStart(7, "0"),
+          // Читаем typeCaption и isoCode из DTO
+          typeLegacy: x.typeCaption || "",
+          iso: x.isoCode || "",
+          pw: x.tareStencilKg != null ? Math.round(x.tareStencilKg) : 0,
+          tareFact: x.tareFactKg != null ? Math.round(x.tareFactKg) : null,
+          gross: x.grossKg != null ? Math.round(x.grossKg) : null,
+          grossRepeat: x.grossRepeatKg != null ? Math.round(x.grossRepeatKg) : null,
+          state: x.state || "inuse",
+          procState: x.procState || "",
+          owner: x.responsible || "Не назначен",
+          kgmk: !!x.isKgmk,
+          retired: !!x.isRetired, // Теперь совпадает с именем в DTO
+          block: x.block,
+          bay: x.bay,
+          tier: x.tier,
+          docs: x.docs || [],
+          moveLog: x.moveLog || [],
+          changeLog: x.changeLog || [],
+          createdAt: x.createdAt ? new Date(x.createdAt).getTime() : Date.now(),
+          updatedAt: x.updatedAt ? new Date(x.updatedAt).getTime() : Date.now(),
+          note: x.notes || ""
+      };
+  }
+
+  function buildLayoutFromData(dataList) {
+  const layoutMap = new Map();
+  dataList.forEach(d => {
+  if (d.block) {
+  if (!layoutMap.has(d.block)) {
+  layoutMap.set(d.block, { bays: new Set() });
+  }
+  if (d.bay != null) {
+  layoutMap.get(d.block).bays.add(d.bay);
+  }
+  }
+  });
+  return layoutMap;
+  }
+
+  async function loadDictionaries() {
+      try {
+          const [ownersRes, prefixesRes, statesRes, typesRes] = await Promise.all([
+              fetch(`${API_BASE}/dictionaries/owners`),
+              fetch(`${API_BASE}/dictionaries/prefixes`),
+              fetch(`${API_BASE}/dictionaries/states`),
+              fetch(`${API_BASE}/dictionaries/types`)
+          ]);
+
+          if (ownersRes.ok) {
+              const ownersJson = await ownersRes.json();
+              OWNERS = ownersJson; // Ожидаем список объектов {id, fullName}
+              // Обновляем селект в модалке и фильтры
+              const ownerSelect = document.getElementById('f-owner');
+              const bulkOwnerSelect = document.getElementById('bb-owner');
+              const optionsHtml = OWNERS.map(o => `<option value="${o.fullName}">${o.fullName}</option>`).join("");
+              if(ownerSelect) ownerSelect.innerHTML = `<option value="">Не назначен</option>` + optionsHtml;
+              if(bulkOwnerSelect) bulkOwnerSelect.innerHTML = `<option value="">— не менять —</option>` + optionsHtml;
+          }
+
+          if (prefixesRes.ok) {
+              const prefixesJson = await prefixesRes.json();
+              // Сохраняем массив строк ["NMKU", "TRLU", ...]
+              PREFIXES = prefixesJson.map(p => p.prefix);
+
+              // Заполняем datalist (если используешь старый вариант) или просто храним для combobox
+              const preList = $("#prefix-list");
+              if (preList) preList.innerHTML = PREFIXES.map(p => `<option value="${p}">`).join("");
+          }
+
+          if(statesRes.ok) {
+              const statesJson = await statesRes.json();
+              statesJson.forEach(s => {
+                  const code = s.code;
+                  if(!code) return;
+
+                  STATES[code] = {
+                      name: s.name || code,
+                      color: s.colorHex || STATES[code]?.color || "#888",
+                      hex: s.colorHex || STATES[code]?.hex || "#888",
+                      pulse: !!s.pulse
+                  };
+              });
+          }
+
+          if (typesRes.ok) {
+              const typesJson = await typesRes.json();
+              ALL_TYPES = typesJson.map(t => t.caption);
+              window.CONTAINER_TYPES = typesJson;
+              // Заполняем datalist
+              const typeList = $("#type-list");
+              typeList.innerHTML = typesJson.map(t => `<option value="${t.caption}">`).join("");
+          }
+      } catch (e) {
+          console.warn("Не удалось загрузить справочники, используем дефолтные", e);
+      }
+  }
+
+  function initCombobox(inputId, listId, containerId, getDataFn) {
+      const input = document.getElementById(inputId);
+      const list = document.getElementById(listId);
+      const container = document.getElementById(containerId);
+
+      if (!input || !list || !container) return;
+
+      // Открытие/закрытие списка
+      const toggleList = (show) => {
+          if (show) {
+              container.classList.add('open');
+              renderOptions(input.value);
+          } else {
+              // Небольшая задержка, чтобы клик по опции успел сработать
+              setTimeout(() => container.classList.remove('open'), 200);
+          }
+      };
+
+      // Рендер опций с фильтрацией
+      const renderOptions = (filterText = "") => {
+          const items = getDataFn(); // Получаем актуальные данные (PREFIXES или TYPES)
+          const filter = filterText.toUpperCase();
+
+          // Фильтруем и сортируем
+          const filtered = items.filter(item => {
+              const val = typeof item === 'string' ? item : item.caption;
+              return val.toUpperCase().includes(filter);
+          }).sort((a, b) => {
+              const valA = typeof a === 'string' ? a : a.caption;
+              const valB = typeof b === 'string' ? b : b.caption;
+              return valA.localeCompare(valB);
+          });
+
+          // Ограничиваем количество, чтобы не тормозило
+          const limited = filtered.slice(0, 50);
+
+          list.innerHTML = limited.map(item => {
+              const val = typeof item === 'string' ? item : item.caption;
+              const isSelected = val === input.value ? 'selected' : '';
+              return `<div class="option ${isSelected}" data-value="${val}">${val}</div>`;
+          }).join("");
+
+          if (limited.length === 0) {
+              list.innerHTML = `<div class="option" style="color:var(--muted); cursor:default;">Ничего не найдено</div>`;
+          }
+      };
+
+      // Обработчики событий
+      input.addEventListener('focus', () => toggleList(true));
+      input.addEventListener('click', () => toggleList(true));
+
+      // Закрытие при клике вне
+      document.addEventListener('click', (e) => {
+          if (!container.contains(e.target)) {
+              toggleList(false);
+          }
+      });
+
+      // Фильтрация при вводе
+      input.addEventListener('input', (e) => {
+          renderOptions(e.target.value);
+          if (!container.classList.contains('open')) container.classList.add('open');
+      });
+
+      // Выбор опции
+      list.addEventListener('click', (e) => {
+          const option = e.target.closest('.option');
+          if (option && option.dataset.value) {
+              input.value = option.dataset.value;
+              toggleList(false);
+              // Триггерим событие input, чтобы обновить заголовок карточки (liveHeader)
+              input.dispatchEvent(new Event('input'));
+          }
+      });
+  }
+
+  async function loadPage(pageNum, forceOnlyPlaced = null) {
+    if (pagination.isLoading || !pagination.hasMore) return;
+    pagination.isLoading = true;
+
+    // Определяем, нужен ли нам фильтр "только с координатами"
+    // Если forceOnlyPlaced передан явно, используем его.
+    // Иначе смотрим на текущий view: если 'stacks', то true.
+    const needOnlyPlaced = forceOnlyPlaced !== null ? forceOnlyPlaced : (view === 'stacks');
+
+    try {
+        if (pageNum === 0) {
+            // Для счетчика тоже можно использовать фильтр, чтобы цифра совпадала с тем, что на экране
+            const countParams = new URLSearchParams();
+            if (needOnlyPlaced) countParams.append('onlyPlaced', true);
+
+            if (query) {
+                LAYOUT = new Map();
+            }
+
+            const c = await fetch(`${API_BASE}/containers/count?${countParams.toString()}`); // Примечание: getCount на бэке тоже надо бы обновить, но пока оставим общий или доработаем ниже
+            // Пока оставим старый вызов count, чтобы не ломать бэк, если ты не обновишь Controller.getCount
+            const cOld = await fetch(API_BASE + "/containers/count");
+            if (cOld.ok) {
+                const cj = await cOld.json();
+                // Если мы в режиме штабелей, реальное число может быть меньше, но для простоты оставим total как есть
+                // или можно просто не обновлять total в этом режиме
+                if(!needOnlyPlaced) {
+                    pagination.totalElements = cj.total || 0;
+                    $("#total").textContent = fmt(pagination.totalElements);
+                }
+            }
+        }
+
+        const params = new URLSearchParams({ page: pageNum, size: pagination.size });
+        if (needOnlyPlaced) {
+            params.append('onlyPlaced', true);
+        }
+
+        // Добавляем текущие фильтры (поиск, состояние), если они есть
+        if (query) params.append('query', query);
+        // ... другие фильтры ...
+
+        const r = await fetch(`${API_BASE}/containers?${params.toString()}`);
+        if (!r.ok) throw new Error("Network error");
+        const arr = await r.json();
+
+        if (!arr || arr.length === 0) {
+            pagination.hasMore = false;
+        } else {
+            const mappedItems = arr.map(mapDto);
+
+            // ВАЖНО: Если это первая страница и мы сменили режим (например, включили фильтр),
+            // нам нужно очистить старые данные, чтобы не было дублей или мусора
+            if (pageNum === 0) {
+                DATA = mappedItems;
+            } else {
+                DATA = DATA.concat(mappedItems);
+            }
+
+            pagination.page++;
+            $("#shown").textContent = fmt(DATA.length);
+
+            // Обновляем LAYOUT
+            const newLayoutPart = buildLayoutFromData(mappedItems);
+            newLayoutPart.forEach((val, key) => {
+                if (!LAYOUT.has(key)) LAYOUT.set(key, val);
+                else {
+                    // lay.bays может быть Set или Array, приводим к Set для мерджа
+                    const currentBays = LAYOUT.get(key).bays;
+                    const currentSet = currentBays instanceof Set ? currentBays : new Set(currentBays);
+                    val.bays.forEach(b => currentSet.add(b));
+                    LAYOUT.get(key).bays = Array.from(currentSet).sort((a,b)=>a-b);
+                }
+            });
+
+            if (arr.length < pagination.size) pagination.hasMore = false;
+        }
+
+        // Фасеты строим только при полной загрузке или первом входе, чтобы не моргало
+        if(pageNum === 0) buildFacets();
+
+        // Рендерим
+        render(false); // false = не сбрасывать скролл при догрузке
+
+    } catch (e) {
+        console.error("Ошибка загрузки:", e);
+        // Фолбэк на демо только если совсем пусто
+        if (pageNum === 0 && DATA.length === 0) {
+             // ... (твой код генерации демо) ...
+             DATA = genData(1240);
+             dataSource = "demo";
+             if(LAYOUT.size === 0) LAYOUT = buildPlan(1240).layout;
+             pagination.totalElements = DATA.length;
+             $("#total").textContent = fmt(pagination.totalElements);
+             $("#shown").textContent = fmt(DATA.length);
+             pagination.hasMore = false;
+             buildFacets();
+             render(true);
+        }
+    } finally {
+        pagination.isLoading = false;
+    }
+}
+
+  async function loadData() {
+    await loadDictionaries();
+    await loadStats();
+    DATA = []; LAYOUT = new Map(); pagination.page = 0; pagination.hasMore = true;
+    await loadPage(0);
+
+    if (DATA.length > 0) dataSource = "db";
+
+    // 1. Строим LAYOUT из данных
+    if (dataSource === "db") {
+        LAYOUT = buildLayoutFromData(DATA);
+    } else {
+        if (LAYOUT.size === 0) LAYOUT = buildPlan(1240).layout;
+    }
+
+    // 2. ПРИНУДИТЕЛЬНОЕ ДОБАВЛЕНИЕ ПУСТЫХ СЕКЦИЙ
+    // Проходим по всем данным и гарантируем, что каждый блок есть в LAYOUT
+    DATA.forEach(d => {
+        if (d.block && !LAYOUT.has(d.block)) {
+            LAYOUT.set(d.block, { bays: new Set() });
+        }
+    });
+
+    // Если хочешь добавить фиксированные секции (A, B, C, D), даже если их нет в DATA:
+    // ['A', 'B', 'C', 'D'].forEach(b => { if(!LAYOUT.has(b)) LAYOUT.set(b, { bays: new Set() }); });
+
+    DATA.forEach(d => { d.docs = d.docs || []; d.moveLog = d.moveLog || []; d.changeLog = d.changeLog || []; });
+
+    buildFacets();
+
+}
+
+  function setupInfiniteScroll() {
+    const yardElement = $("#yard");
+
+    // Основная функция проверки скролла
+    const checkScroll = (target) => {
+        if (pagination.isLoading || !pagination.hasMore) return;
+        // Если мы в режиме штабелей, infinite scroll работает иначе (или отключен для общего списка)
+        if (view === 'stacks') return;
+
+        const { scrollTop, scrollHeight, clientHeight } = target;
+        if (scrollTop + clientHeight >= scrollHeight - 300) {
+            loadPage(pagination.page);
+        }
+    };
+
+    // Слушатель на основной двор (для Площадки и Реестра)
+    yardElement.addEventListener('scroll', () => checkScroll(yardElement));
+
+    // Нам нужно также слушать скролл внутри колонок "Группы".
+    // Так как колонки создаются динамически, используем делегирование событий на #yard
+    yardElement.addEventListener('scroll', (e) => {
+        if (view === 'groups' && e.target.classList.contains('gcol-scroll')) {
+            checkScroll(e.target);
+        }
+    }, true); // true означает capturing phase, чтобы поймать скролл вложенных элементов
+}
+
+  /* ============================================================
+  UI STATE & LOGIC
+  ============================================================ */
+  let view = "yard", selectedId = null, editing = null, editingOld = null, drawerTab = "data";
+  const selectedIds = new Set();
+  let role = "editor";
+  const canWrite = () => role !== "reader";
+  const canAdmin = () => role === "admin";
+  let planMode = false, factData = null;
+  const factUndo = [], factRedo = [], planUndo = [], planRedo = [];
+  let prevUndoLen = 0;
+  const filters = { state: new Set(), proc: new Set(), type: new Set(), own: new Set() };
+  let query = "", sort = "num";
+  const $ = s => document.querySelector(s);
+  const yard = $("#yard");
+  const yardWrap = $(".yard-wrap");
+  const OVER = 5;
+  const ROWH = { yard: 192, list: 71, g: 69 };
+  const MINCOL = 222;
+  const TSTEP = 26;
+  const STACK_CAP = 60;
+  const initials = n => n.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const fmt = n => Number(n || 0).toLocaleString("ru-RU");
+  const pad2 = n => String(n).padStart(2, "0");
+  const fmtDate = ts => ts ? new Date(ts).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+
+  const actUndo = () => planMode ? planUndo : factUndo;
+  const actRedo = () => planMode ? planRedo : factRedo;
+  const anyFilterActive = () => !!(query || filters.state.size || filters.proc.size || filters.type.size || filters.own.size);
+  function topTier(block, bay) { let m = 0; for (const d of DATA) if (d.block === block && d.bay === bay && d.tier > m) m = d.tier; return m; }
+  function isProblem(d) { return d.state === "damaged" || d.state === "repair"; }
+  function dispWeight(d) { return d.gross != null ? d.gross : (d.tareFact != null ? d.tareFact : d.pw); }
+  function hasDoc(d, t) { return (d.docs || []).some(x => x.type === t); }
+  function typeLabel(d) { return d.typeLegacy || (d.iso ? d.iso : "—"); }
+  function typeCaptions() {
+  const m = new Map();
+  DATA.forEach(d => { const k = d.typeLegacy || "—"; m.set(k, (m.get(k) || 0) + 1); });
+  return Array.from(m.entries()).sort((a, b) => a[0].localeCompare(b[0], "ru"));
+  }
+  function checkTierLimit(name, block, bay, newTier) {
+  if (newTier > HARD_MAX) return { ok: false, reason: `превышен абсолютный предел площадки (${HARD_MAX} ярусов)` };
+  const lt = Math.min(HARD_MAX, typeAttrs(name).maxStack);
+  if (newTier > lt) return { ok: false, reason: `для типа «${name}» допустимо ≤ ${lt} ярусов` };
+  if (newTier > 1) {
+  const under = DATA.find(x => x.block === block && x.bay === bay && x.tier === newTier - 1);
+  if (under) { const lu = tierLimitByItem(under); if (newTier > lu) return { ok: false, reason: `нижний контейнер (${typeLabel(under)}) выдерживает ≤ ${lu} ярусов` }; }
+  }
+  return { ok: true };
+  }
+  function compactStack(block, bay) {
+  const items = DATA.filter(d => d.block === block && d.bay === bay).sort((a, b) => a.tier - b.tier);
+  items.forEach((d, i) => d.tier = i + 1);
+  }
+  function buildFacets() {
     const getCount = (key, localFilterFn) => {
         if (GLOBAL_STATS[key] !== undefined) return Number(GLOBAL_STATS[key]);
         return DATA.filter(localFilterFn).length;
@@ -87,6 +1478,7 @@ function buildFacets() {
     localTypes.forEach((_, cap) => allTypeCaptions.add(cap));
 
     const typeEntries = Array.from(allTypeCaptions)
+        .filter(cap => !isJunkType(cap))
         .sort((a, b) => a.localeCompare(b, "ru"))
         .map(cap => {
             const count = hasTypeStats
@@ -127,3 +1519,1620 @@ function buildFacets() {
         };
     });
 }
+  function chipHTML(facet, val, name, count, color, hasDot) {
+  return `<button class="chip" data-facet="${facet}" data-val="${val}">
+  ${hasDot ? `<span class="c-dot" style="background:${color}"></span>` : `<span class="check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></span>`}
+  <span class="c-name">${name}</span><span class="c-count">${count}</span></button>`;
+  }
+  function getFiltered() {
+  let arr = DATA.filter(d => {
+  if (filters.state.size && !filters.state.has(d.state)) return false;
+  if (filters.proc.size) { const v = d.procState || "__none"; if (!filters.proc.has(v)) return false; }
+  if (filters.type.size && !filters.type.has(d.typeLegacy || "—")) return false;
+  if (filters.own.size && !filters.own.has(d.kgmk ? "kgmk" : "other")) return false;
+  if (query) { const q = query.toUpperCase().replace(/\s+/g, ""); if (!(d.prefix + d.number).toUpperCase().includes(q)) return false; }
+  return true;
+  });
+  if (sort === "num") arr.sort((a, b) => (a.prefix + a.number).localeCompare(b.prefix + b.number));
+  if (sort === "state") arr.sort((a, b) => a.state.localeCompare(b.state) || (a.prefix + a.number).localeCompare(b.prefix + b.number));
+  if (sort === "proc") arr.sort((a, b) => (a.procState || "").localeCompare(b.procState || "") || (a.prefix + a.number).localeCompare(b.prefix + b.number));
+  if (sort === "weight") arr.sort((a, b) => (b.gross || 0) - (a.gross || 0));
+  return arr;
+  }
+  function animateNumber(el, to) {
+  const from = +(el.dataset.v || 0); el.dataset.v = to; if (from === to) { el.textContent = fmt(to); return; }
+  const t0 = performance.now(), dur = 420;
+  (function step(t) { const k = Math.min(1, (t - t0) / dur); const e = 1 - Math.pow(1 - k, 3); el.textContent = fmt(Math.round(from + (to - from) * e)); if (k < 1) requestAnimationFrame(step); })(t0);
+  }
+  function makeVirtual(outer, { rowH, columns, items, buildItem, mode, fresh }) {
+  outer.innerHTML = "";
+  const inner = document.createElement("div"); inner.className = "vroot"; outer.appendChild(inner);
+  const win = document.createElement("div"); win.className = "vwindow" + (fresh ? " fresh" : "");
+  if (mode === "grid") {
+  win.style.display = "grid"; win.style.gridTemplateColumns = `repeat(${columns},minmax(0,1fr))`;
+  win.style.gridAutoRows = rowH + "px"; win.style.columnGap = "18px"; win.style.alignItems = "start";
+  } else { win.style.display = "flex"; win.style.flexDirection = "column"; }
+  inner.appendChild(win);
+  const state = { columns, rowH, mode };
+  const rowCount = () => mode === "grid" ? Math.max(1, Math.ceil(items.length / state.columns)) : items.length;
+  const setInnerH = () => { inner.style.height = (rowCount() * rowH) + "px"; };
+  setInnerH();
+  function paint() {
+  const viewH = outer.clientHeight || 600;
+  const firstRow = Math.max(0, Math.floor(outer.scrollTop / rowH) - OVER);
+  const lastRow = Math.min(rowCount() - 1, Math.floor((outer.scrollTop + viewH - 1) / rowH) + OVER);
+  const a = mode === "grid" ? firstRow * state.columns : firstRow;
+  const b = mode === "grid" ? Math.min(items.length, (lastRow + 1) * state.columns) : (lastRow + 1);
+  let html = ""; for (let i = a; i < b; i++)html += buildItem(items[i]);
+  win.innerHTML = html; win.style.top = (firstRow * rowH) + "px";
+  win.querySelectorAll("[data-id]").forEach(n => n.onclick = () => openDrawer(+n.dataset.id));
+  }
+  let raf = 0;
+  outer.onscroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; paint(); }); };
+  outer._v = { paint, refreshCols(nc) { if (mode === "grid" && nc && nc !== state.columns) { state.columns = nc; win.style.gridTemplateColumns = `repeat(${nc},minmax(0,1fr))`; setInnerH(); } paint(); } };
+  paint();
+  }
+  function yardCols() { const w = yard.clientWidth - 48; return Math.max(1, Math.floor((w + 18) / (MINCOL + 18))); }
+  function procChipHTML(d) {
+  if (!d.procState) return `<span class="pr-chip none">—</span>`;
+  const p = PROC[d.procState]; return `<span class="pr-chip" style="color:${p.hex}"><span class="d" style="background:${p.color}"></span>${p.name}</span>`;
+  }
+  function boxHTML(d) {
+  const s = STATES[d.state], cc = computedCheck(d), bad = cc !== +d.number[6];
+  return `<div class="box ${s.pulse ? 'pulse' : ''} ${d.retired ? 'is-retired' : ''} ${d.id === selectedId ? 'sel' : ''}" style="--c:${s.color}" data-id="${d.id}">
+  <div class="roof"></div><div class="wall">
+  <div class="toprow"><span class="prefix">${d.prefix}</span><span class="status-led" title="${s.name}"></span></div>
+  <div class="num">${d.number.slice(0, 6)}<span class="chk ${bad ? 'bad' : ''}">${d.number[6]}</span></div>
+  <div class="meta"><span class="type">${typeLabel(d)}</span><span class="wt">${fmt(dispWeight(d))} кг</span></div>
+  </div><div class="footer"><span class="who"><span class="av">${initials(d.owner)}</span>${d.owner.split(" ")[0]}</span>
+  ${d.kgmk ? `<span class="badge-kgmk">КГМК</span>` : `<span style="opacity:.7">аренда</span>`}</div></div>`;
+  }
+  function rowHTML(d) {
+  const s = STATES[d.state], cc = computedCheck(d), bad = cc !== +d.number[6];
+  const m = (lbl, val) => `<div class="m"><span class="ml">${lbl}</span><span class="mv ${val == null ? 'emp' : ''}">${val == null ? '—' : fmt(val)}</span></div>`;
+  return `<div class="row ${d.id === selectedId ? 'sel' : ''}" data-id="${d.id}">
+  <div class="mini" style="--c:${s.color}"><span class="led"></span></div>
+  <div class="id"><div class="pn">${d.prefix} ${d.number.slice(0, 6)}<span class="chk ${bad ? 'bad' : ''}">·${d.number[6]}</span></div><div class="ty">${typeLabel(d)}</div></div>
+  <div class="masses">${m("траф.", d.pw)}${m("тара", d.tareFact)}${m("брутто", d.gross)}</div>
+  <div class="st-chip"><span class="d" style="background:${s.color}"></span>${s.name}</div>
+  ${procChipHTML(d)}
+  <div class="who2"><span class="av">${initials(d.owner)}</span>${d.owner}</div>
+  <div class="tags">${d.kgmk ? `<span class="tag k">КГМК</span>` : `<span class="tag">аренда</span>`}${d.retired ? `<span class="tag r">выведен</span>` : ""}</div></div>`;
+  }
+  function gboxHTML(d) {
+  return `<div class="gbox ${d.id === selectedId ? 'sel' : ''}" style="--c:${STATES[d.state].color}" data-id="${d.id}">
+  <div class="pn">${d.prefix} ${d.number}</div><div class="sub"><span>${typeLabel(d)}</span><span>${fmt(dispWeight(d))} кг</span></div></div>`;
+  }
+  function applyChange(resetScroll) { if (view === "stacks") { updateStackHighlights(); } else render(resetScroll); }
+  function render(resetScroll) {
+  const arr = getFiltered();
+  $("#shown").textContent = fmt(arr.length);
+  updateTopCounters();
+  const sp = $("#srcPill");
+  sp.textContent = dataSource === "db" ? ("БД: " + pagination.totalElements) : ("ДЕМО: " + DATA.length);
+  sp.classList.toggle("src-db", dataSource === "db");
+  $("#sortCtl").classList.toggle("dim-ctl", view === "stacks");
+  yardWrap.classList.toggle("is-stacks", view === "stacks");
+  const yh = $("#yardHint");
+  yh.style.display = (view === "stacks" && dataSource === "demo") ? "inline-flex" : "none";
+  if (resetScroll) yard.scrollTop = 0;
+  yard.onscroll = null; yard._v = null;
+  if (!arr.length && view !== "stacks") { yard.innerHTML = `<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="6" width="20" height="12" rx="1.5"/><path d="M6 6v12M10 6v12M14 6v12M18 6v12"/></svg><div>Под текущие фильтры контейнеров не нашлось.</div></div>`; syncBulkUI(); return; }
+  if (view === "yard") makeVirtual(yard, { rowH: ROWH.yard, columns: yardCols(), items: arr, buildItem: boxHTML, mode: "grid", fresh: resetScroll });
+  else if (view === "list") makeVirtual(yard, { rowH: ROWH.list, columns: 1, items: arr, buildItem: rowHTML, mode: "col", fresh: resetScroll });
+  else if (view === "groups") renderGroups(arr, resetScroll);
+  else renderStacks();
+  syncBulkUI();
+  }
+  function renderGroups(arr, fresh) {
+    const order = ["damaged", "inuse"];
+
+    const scrollPositions = {};
+    if (!fresh) {
+        yard.querySelectorAll(".gcol-scroll").forEach(sc => {
+            scrollPositions[sc.dataset.state] = sc.scrollTop;
+        });
+    }
+
+    if (fresh || !yard.querySelector(".groups")) {
+        yard.innerHTML = `<div class="groups">` + order.map(k => {
+            const s = STATES[k];
+            return `<div class="gcol" data-group-state="${k}">
+                <div class="gh"><span class="d" style="background:${s.color}"></span><span class="t">${s.name}</span><span class="n" id="grp-cnt-${k}">0</span></div>
+                <div class="gcol-scroll" data-state="${k}"></div>
+            </div>`;
+        }).join("") + `</div>`;
+
+        setupGroupDropZones(); // Если реализован D&D
+    }
+
+    yard.querySelectorAll(".gcol-scroll").forEach(sc => {
+        const k = sc.dataset.state;
+        const items = arr.filter(d => d.state === k);
+
+        const cntEl = $(`#grp-cnt-${k}`);
+        if (cntEl) cntEl.textContent = items.length;
+
+        if (!items.length) {
+            sc.innerHTML = `<div style="font-size:12px;color:var(--muted);padding:8px 6px;text-align:center">пусто</div>`;
+            return;
+        }
+
+        // Используем интерактивную версию
+        makeVirtual(sc, {
+            rowH: ROWH.g,
+            columns: 1,
+            items,
+            buildItem: gboxHTMLInteractive, // <-- ЗДЕСЬ ЗАМЕНА
+            mode: "col",
+            fresh: fresh
+        });
+
+        if (!fresh && scrollPositions[k] !== undefined) {
+            sc.scrollTop = scrollPositions[k];
+        }
+    });
+}
+
+function gboxHTMLDraggable(d) {
+    return `<div class="gbox ${d.id === selectedId ? 'sel' : ''}"
+        style="--c:${STATES[d.state].color}"
+        data-id="${d.id}"
+        draggable="${canWrite() ? 'true' : 'false'}"
+        ondragstart="onGroupDragStart(event, ${d.id})">
+        <div class="pn">${d.prefix} ${d.number}</div>
+        <div class="sub"><span>${typeLabel(d)}</span><span>${fmt(dispWeight(d))} кг</span></div>
+    </div>`;
+}
+
+window.onGroupDragStart = function(e, id) {
+    if (!canWrite()) { e.preventDefault(); return; }
+    draggedGroupId = id;
+    e.dataTransfer.effectAllowed = "move";
+    // Небольшой хак, чтобы браузер начал драг, но мы могли стилизовать элемент
+    setTimeout(() => e.target.classList.add('dragging'), 0);
+};
+function setupGroupDropZones() {
+    const cols = document.querySelectorAll('.gcol');
+
+    cols.forEach(col => {
+        col.addEventListener('dragover', e => {
+            e.preventDefault(); // Разрешаем drop
+            e.dataTransfer.dropEffect = "move";
+            col.classList.add('drag-over');
+        });
+
+        col.addEventListener('dragleave', e => {
+            col.classList.remove('drag-over');
+        });
+
+        col.addEventListener('drop', e => {
+            e.preventDefault();
+            col.classList.remove('drag-over');
+
+            const newState = col.dataset.groupState;
+            if (draggedGroupId && newState) {
+                moveContainerToGroup(draggedGroupId, newState);
+            }
+            draggedGroupId = null;
+        });
+    });
+}
+async function moveContainerToGroup(id, newState) {
+    const container = DATA.find(d => d.id === id);
+    if (!container || container.state === newState) return;
+
+    const oldState = container.state;
+
+    // Оптимистичное обновление UI
+    container.state = newState;
+
+    // Перерисовываем группы (контейнер исчезнет из старой и появится в новой)
+    // Важно: renderGroups ожидает отфильтрованный массив, но getFiltered() вернет всё с учетом фильтров
+    renderGroups(getFiltered(), false);
+
+    toast(`Контейнер ${container.prefix} ${container.number} → ${STATES[newState].name}`);
+
+    // Отправка на бэкенд
+    if (dataSource === "db") {
+        try {
+            const payload = { state: newState };
+            const res = await fetch(`${API_BASE}/containers/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error("Failed to update state");
+            refreshFacets();
+        } catch (e) {
+            console.error(e);
+            // Откат при ошибке
+            container.state = oldState;
+            renderGroups(getFiltered(), false);
+            toast("Ошибка обновления состояния", true);
+        }
+    }
+}
+
+  function groupBlocks() {
+  const blocks = new Map();
+  for (const d of DATA) {
+  if (!blocks.has(d.block)) blocks.set(d.block, new Map());
+  const b = blocks.get(d.block);
+  if (!b.has(d.bay)) b.set(d.bay, []);
+  b.get(d.bay).push(d);
+  }
+  return blocks;
+  }
+  function renderOneBlock(name) {
+    let lay = LAYOUT.get(name);
+    const idx = groupBlocks().get(name) || new Map();
+
+    // 1. Собираем все известные номера рядов
+    let knownBays = new Set();
+
+    // Из LAYOUT
+    if (lay && lay.bays) {
+        const source = lay.bays instanceof Set ? lay.bays : new Set(lay.bays);
+        source.forEach(x => knownBays.add(x));
+    }
+
+    // Из DATA
+    idx.forEach((_, bay) => knownBays.add(bay));
+
+    let bays = Array.from(knownBays).sort((a, b) => a - b);
+
+    // 2. ИСПРАВЛЕНИЕ: Гарантируем минимум 20 рядов
+    // Если рядов нет или их мало, мы всё равно рисуем сетку до 20 (или до максимума, если он больше 20)
+    const MIN_BAYS = 20;
+    const maxBay = Math.max(MIN_BAYS, ...bays);
+
+    const fullBays = [];
+    for (let i = 1; i <= maxBay; i++) {
+        fullBays.push(i);
+    }
+    bays = fullBays;
+
+    let maxTier = 0, totalTiers = 0;
+
+    const piles = bays.map(bn => {
+        const items = (idx.get(bn) || []).slice().sort((a, b) => a.tier - b.tier);
+        const h = items.length ? Math.max(...items.map(i => i.tier)) : 0;
+
+        if (h > maxTier) maxTier = h;
+        totalTiers += items.length;
+
+        const layers = items.map(d => {
+            const buried = h - d.tier;
+            const bottomPos = (d.tier - 1) * TSTEP;
+            return `<div class="tier ${d.id === selectedId ? 'sel' : ''} ${selectedIds.has(d.id) ? 'msel' : ''}"
+                style="--c:${STATES[d.state].color}; bottom:${bottomPos}px"
+                data-id="${d.id}"
+                title="${d.prefix} ${d.number} · ярус ${d.tier}${buried > 0 ? ` · снять ${buried} сверху` : ""}">
+                <span class="tn">${d.number.slice(2, 6)}</span>
+                ${buried > 0 ? `<span class="buried"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12l7 7 7-7"/></svg>${buried}</span>` : ""}
+                </div>`;
+        }).join("");
+
+        let emptySlotsHtml = "";
+        const targetTier = h === 0 ? 1 : h + 1;
+
+        if (targetTier <= HARD_MAX) {
+            const bottomPos = (targetTier - 1) * TSTEP;
+            emptySlotsHtml = `<div class="empty-slot"
+                style="bottom:${bottomPos}px"
+                onclick="openSlotPicker('${name}', ${bn}, ${targetTier})"
+                title="Найти контейнер в БД и поставить сюда">
+                + T${targetTier}
+                </div>`;
+        }
+
+        const pileH = Math.max(1, HARD_MAX) * TSTEP;
+
+        return `<div class="stack-col" data-block="${name}" data-bay="${bn}">
+            <div class="pile" style="height:${pileH}px">${layers}${emptySlotsHtml}</div>
+            <div class="bay-no">${pad2(bn)}</div>
+            </div>`;
+    }).join("");
+
+    const axH = Math.max(1, maxTier + 1);
+    const axis = Array.from({length: axH}, (_, i) => axH - i).map(t => `<span class="ta-m" style="bottom:${(t - 1) * TSTEP}px">T${t}</span>`).join("");
+    const cap = bays.length * HARD_MAX;
+    const load = cap ? Math.round(totalTiers / cap * 100) : 0;
+
+    return `<div class="stack-block" data-block="${name}">
+        <div class="sb-head">
+        <div class="sb-title"><span class="blk">${name}</span>Секция ${name}</div>
+        <div class="sb-meta">${bays.length} рядов · ${totalTiers} ярусов · лимит ≤${HARD_MAX}</div>
+        <div class="sb-load">загрузка <div class="bar"><i style="width:${load}%"></i></div>${load}%</div>
+        </div>
+        <div class="sb-body">
+        <div class="tier-axis" style="height:${axH * TSTEP}px">${axis}</div>
+        <div class="sb-row" style="height:${axH * TSTEP + 32}px">${piles}</div>
+        </div>
+        </div>`;
+}
+  function renderStacks() {
+  const blockNames = [...LAYOUT.keys()].sort((a, b) => a.localeCompare(b));
+  yard.innerHTML = `<div class="yard-stacks">` + blockNames.map(renderOneBlock).join("") + `</div>`;
+  updateStackHighlights();
+  }
+  let lastAimId = null;
+  function updateStackHighlights() {
+  if (view !== "stacks") return;
+  const on = anyFilterActive();
+  const matched = on ? new Set(getFiltered().map(d => d.id)) : null;
+  yard.querySelectorAll(".tier").forEach(t => {
+  if (!on) { t.classList.remove("hit", "dim"); }
+  else { const m = matched.has(+t.dataset.id); t.classList.toggle("hit", m); t.classList.toggle("dim", !m); }
+  });
+  yard.querySelectorAll(".stack-block").forEach(bl => {
+  const rows = bl.querySelectorAll(".stack-col").length;
+  const total = bl.querySelectorAll(".tier").length;
+  const found = on ? bl.querySelectorAll(".tier.hit").length : total;
+  bl.querySelector(".sb-meta").textContent = on ? `${rows} рядов · найдено ${found} · лимит ≤${HARD_MAX}` : `${rows} рядов · ${total} ярусов · лимит ≤${HARD_MAX}`;
+  bl.classList.toggle("has-hit", on && found > 0);
+  });
+  $("#shown").textContent = fmt(on ? matched.size : DATA.length);
+  if (on && matched && matched.size >= 1 && matched.size <= 12) {
+  const first = [...matched][0];
+  if (first !== lastAimId) {
+  lastAimId = first;
+  const el = yard.querySelector('.tier[data-id="' + first + '"]');
+  if (el) {
+  const blk = el.closest(".stack-block");
+  if (blk) blk.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  el.classList.remove("search-ring"); void el.offsetWidth; el.classList.add("search-ring");
+  setTimeout(() => el.classList.remove("search-ring"), 1500);
+  }
+  }
+  } else lastAimId = null;
+  }
+  function clearSelection() {
+  if (!selectedIds.size) { syncBulkUI(); return; }
+  selectedIds.clear();
+  yard.querySelectorAll(".tier.msel,.tier.marquee-sel").forEach(t => t.classList.remove("msel", "marquee-sel"));
+  syncBulkUI();
+  }
+  function syncBulkUI() {
+const showBulk = (view === "stacks" || view === "groups") && selectedIds.size > 0;
+
+    $("#bulkBar").classList.toggle("show", showBulk);
+    const label = view === "groups" ? "контейнеров" : "ярусов";
+  $("#bb-n").textContent = selectedIds.size;
+  $("#bb-apply").disabled = !canWrite();
+  $("#bb-apply").title = canWrite() ? "Применить изменения к выделенным" : "Недостаточно прав (роль: чтение)";
+  const n = actUndo().length, r = actRedo().length;
+  const ub = $("#undoBtn"), rb = $("#redoBtn");
+  const writeOK = canWrite();
+  ub.classList.toggle("disabled", n === 0 || !writeOK); ub.disabled = n === 0 || !writeOK;
+  rb.classList.toggle("disabled", r === 0 || !writeOK); rb.disabled = r === 0 || !writeOK;
+  const badge = $("#undoBadge");
+  badge.textContent = n; badge.style.display = n > 0 ? "flex" : "none";
+  if (n !== prevUndoLen) { badge.classList.remove("bump"); void badge.offsetWidth; badge.classList.add("bump"); prevUndoLen = n; }
+  ub.title = writeOK ? (n > 0 ? `Отменить последнее перемещение (шагов: ${n})` : "Нет движений для отмены") : "Недостаточно прав";
+  rb.title = writeOK ? (r > 0 ? `Повторить отменённое (шагов: ${r})` : "Нет отменённых движений") : "Недостаточно прав";
+  $("#undoRail").classList.toggle("has", view === "stacks" && n > 0);
+  buildRail();
+  }
+  function buildRail() {
+  const track = $("#urTrack");
+  track.querySelectorAll(".ur-tick,.ur-now").forEach(e => e.remove());
+  const stack = actUndo();
+  stack.forEach((s, i) => {
+  const t = document.createElement("div"); t.className = "ur-tick";
+  t.innerHTML = `<span class="dot"></span><span class="lb">${s.label || ("шаг " + (i + 1))}</span>`;
+  t.title = (s.at ? fmtDate(s.at) + " · " : "") + (s.label || "");
+  t.onclick = () => { if (!canWrite()) return; const steps = stack.length - i; for (let k = 0; k < steps; k++)undoOne(); toast("Откат к шагу: " + (s.label || ("№" + (i + 1)))); updateStackHighlights(); syncBulkUI(); };
+  track.appendChild(t);
+  });
+  const now = document.createElement("div"); now.className = "ur-now";
+  now.innerHTML = `<span class="dot"></span><span class="lb">сейчас</span>`;
+  track.appendChild(now);
+  track.scrollLeft = track.scrollWidth;
+  }
+  function flipBlocksAfterApply(blocksSet, snapCoords) {
+  const oldMap = new Map(); snapCoords.forEach(c => oldMap.set(c.id, { x: c._x, y: c._y }));
+  blocksSet.forEach(bn => { const el = yard.querySelector('.stack-block[data-block="' + bn + '"]'); if (el) el.outerHTML = renderOneBlock(bn); });
+  blocksSet.forEach(bn => {
+  const bl = yard.querySelector('.stack-block[data-block="' + bn + '"]'); if (!bl) return;
+  bl.querySelectorAll(".tier").forEach(t => {
+  const id = +t.dataset.id; const o = oldMap.get(id); if (!o || o.x == null) return;
+  const r = t.getBoundingClientRect(); const dx = o.x - r.left, dy = o.y - r.top;
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+  t.style.transition = "none"; t.style.transform = `translate(${dx}px,${dy}px)`;
+  requestAnimationFrame(() => { t.style.transition = "transform .44s cubic-bezier(.2,.85,.25,1)"; t.style.transform = ""; });
+  setTimeout(() => { t.style.transition = ""; t.style.transform = ""; }, 460);
+  });
+  });
+  }
+  function stampRects(snap) {
+  snap.coords.forEach(c => { const el = yard.querySelector('.tier[data-id="' + c.id + '"]'); if (el) { const r = el.getBoundingClientRect(); c._x = r.left; c._y = r.top; } else { c._x = null; c._y = null; } });
+  }
+  function applySnapshot(snap, toStack) {
+  const reverse = { coords: [], logLens: [], label: snap.label, at: snap.at };
+  const blocksSet = new Set();
+  snap.coords.forEach(c => {
+  const d = DATA.find(x => x.id === c.id); if (!d) return;
+  reverse.coords.push({ id: c.id, block: d.block, bay: d.bay, tier: d.tier, _x: c._x, _y: c._y });
+  blocksSet.add(c.block);
+  });
+  snap.logLens.forEach(l => { const d = DATA.find(x => x.id === l.id); if (d) reverse.logLens.push({ id: l.id, len: (d.moveLog || []).length }); });
+  snap.coords.forEach(c => { const d = DATA.find(x => x.id === c.id); if (d) { d.block = c.block; d.bay = c.bay; d.tier = c.tier; } });
+  snap.logLens.forEach(l => { const d = DATA.find(x => x.id === l.id); if (d) d.moveLog = (d.moveLog || []).slice(0, l.len); });
+  toStack.push(reverse); if (toStack.length > STACK_CAP) toStack.shift();
+  flipBlocksAfterApply(blocksSet, snap.coords);
+  }
+  function undoOne() { const s = actUndo().pop(); if (!s) return; applySnapshot(s, actRedo()); return s; }
+  function redoOne() { const s = actRedo().pop(); if (!s) return; applySnapshot(s, actUndo()); return s; }
+  function undoLastMove() { if (!canWrite()) return; const s = undoOne(); if (!s) return; toast("Движение отменено" + (s.label ? ": " + s.label : "")); updateStackHighlights(); syncBulkUI(); }
+  function redoLastMove() { if (!canWrite()) return; const s = redoOne(); if (!s) return; toast("Движение повторено" + (s.label ? ": " + s.label : "")); updateStackHighlights(); syncBulkUI(); }
+  function performMove(removedIds, dstBlock, dstBay, label) {
+  const bySrc = new Map();
+  removedIds.forEach(id => { const d = DATA.find(x => x.id === id); if (!d) return; const k = d.block + "|" + d.bay; if (!bySrc.has(k)) bySrc.set(k, { block: d.block, bay: d.bay, min: d.tier }); else bySrc.get(k).min = Math.min(bySrc.get(k).min, d.tier); });
+  const snap = { coords: [], logLens: [], label, at: Date.now() };
+  bySrc.forEach(({ block, bay, min }) => {
+  DATA.forEach(d => { if (d.block === block && d.bay === bay && d.tier >= min) snap.coords.push({ id: d.id, block: d.block, bay: d.bay, tier: d.tier }); });
+  });
+  removedIds.forEach(id => { const d = DATA.find(x => x.id === id); if (d) snap.logLens.push({ id: d.id, len: (d.moveLog || []).length }); });
+  stampRects(snap);
+  actUndo().push(snap); if (actUndo().length > STACK_CAP) actUndo().shift();
+  actRedo().length = 0;
+  const order = removedIds.map(id => DATA.find(x => x.id === id)).filter(Boolean).sort((a, b) => (a.block + a.bay).localeCompare(b.block + b.bay) || a.tier - b.tier);
+  let h = topTier(dstBlock, dstBay);
+  order.forEach(d => { h++; const from = { block: d.block, bay: d.bay, tier: d.tier }; d.block = dstBlock; d.bay = dstBay; d.tier = h; d.moveLog = d.moveLog || []; d.moveLog.push({ at: Date.now(), from, to: { block: dstBlock, bay: dstBay, tier: h } }); });
+  bySrc.forEach(({ block, bay }) => compactStack(block, bay));
+  const blocksSet = new Set([...bySrc.values()].map(v => v.block)); blocksSet.add(dstBlock);
+  flipBlocksAfterApply(blocksSet, snap.coords);
+  if (dataSource === "db") {
+    const movesPayload = removedIds.map(id => {
+        const d = DATA.find(x => x.id === id);
+        return d ? { id: d.id, block: d.block, bay: d.bay, tier: d.tier } : null;
+    }).filter(Boolean);
+
+    // Выбираем URL: План или Факт
+    const url = planMode
+        ? `${API_BASE}/containers/plans/move`
+        : `${API_BASE}/containers/move`;
+
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(movesPayload)
+    }).then(res => {
+        if (!res.ok) throw new Error("Network error");
+        if (planMode) {
+            // Обновляем локальный кэш планов
+            movesPayload.forEach(m => {
+                PLAN_DATA.set(m.id, { block: m.block, bay: m.bay, tier: m.tier });
+            });
+        }
+    }).catch(err => {
+        console.error("Ошибка синхронизации", err);
+        toast("Ошибка сохранения", true);
+    });
+}
+}
+  let drag = null;
+  const DRAG_THRESHOLD = 4;
+  const NO_SVG = `<svg class="dg-no" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#fff" stroke="#b23a22" stroke-width="2.4"/><line x1="5" y1="5" x2="19" y2="19" stroke="#b23a22" stroke-width="2.4" stroke-linecap="round"/></svg>`;
+  function removedAboveFor(id) { const d = DATA.find(x => x.id === id); if (!d) return 0; return topTier(d.block, d.bay) - d.tier; }
+  function onTierPointerDown(e) {
+  if (view !== "stacks" || e.button !== 0) return;
+  if (!canWrite()) return;
+  const t = e.target.closest(".tier"); if (!t || !yard.contains(t)) return;
+  if ($("#drawer").classList.contains("open")) return;
+  const id = +t.dataset.id; const d = DATA.find(x => x.id === id); if (!d) return;
+  const group = selectedIds.size > 1 && selectedIds.has(id);
+  drag = { id, group, groupIds: group ? [...selectedIds] : [id], fromBlock: d.block, fromBay: d.bay, fromTier: d.tier, movedName: typeLabel(d), tierEl: t, startX: e.clientX, startY: e.clientY, active: false, curCol: null, slot: null, _pile: null, _oldH: null, canDrop: true, denyReason: "", ghost: null };
+  e.preventDefault();
+  }
+  function startDrag() {
+  const d = drag; d.active = true;
+  document.body.classList.add("dragging-active");
+  yard.querySelectorAll(".tier.hit,.tier.dim").forEach(t => t.classList.remove("hit", "dim"));
+  const srcs = new Set(); d.groupIds.forEach(id => { const x = DATA.find(z => z.id === id); if (x) srcs.add(x.block + "|" + x.bay); });
+  d.groupIds.forEach(id => { const el = yard.querySelector('.tier[data-id="' + id + '"]'); if (el) el.classList.add("dragging"); });
+  srcs.forEach(k => { const [bl, bay] = k.split("|"); yard.querySelectorAll('.stack-col[data-block="' + bl + '"][data-bay="' + bay + '"] .tier').forEach(t => { const dd = DATA.find(x => x.id === +t.dataset.id); const isRemoved = d.groupIds.includes(+t.dataset.id); if (dd && !isRemoved && d.groupIds.some(gid => { const g = DATA.find(z => z.id === gid); return g && g.block === dd.block && g.bay === dd.bay && dd.tier > g.tier; })) t.classList.add("lifted"); }); });
+  const dd = DATA.find(x => x.id === d.id);
+  const g = document.createElement("div"); g.className = "drag-ghost" + (d.group ? " group" : ""); g.style.setProperty("--c", STATES[dd.state].color);
+  g.innerHTML = d.group ? `<div class="dg-box"><span class="gn">${d.groupIds.length}</span> ярус${d.groupIds.length > 1 && d.groupIds.length < 5 ? "а" : d.groupIds.length >= 5 ? "ов" : ""}${NO_SVG}</div>` : `<div class="dg-box">${dd.number.slice(2, 6)}${NO_SVG}</div>`;
+  document.body.appendChild(g); d.ghost = g;
+  moveGhost(d.startX, d.startY);
+  }
+  function moveGhost(x, y) { if (drag && drag.ghost) drag.ghost.style.transform = `translate(${x}px,${y}px) translate(-50%,-58%) rotate(-4deg)`; }
+  function currentDropCol(x, y) {
+  if (!drag || !drag.ghost) return null;
+  drag.ghost.style.display = "none";
+  let el = document.elementFromPoint(x, y);
+  drag.ghost.style.display = "";
+  if (!el) return null;
+  const col = el.closest(".stack-col"); if (!col) return null;
+  if (drag.groupIds.some(gid => { const g = DATA.find(z => z.id === gid); return g && g.block === col.dataset.block && +g.bay === +col.dataset.bay; })) return null;
+  return col;
+  }
+  function simulateGroupDrop(ids, block, bay) {
+  const order = ids.map(id => DATA.find(x => x.id === id)).filter(Boolean).sort((a, b) => (a.block + a.bay).localeCompare(b.block + b.bay) || a.tier - b.tier);
+  let h = topTier(block, bay);
+  for (const d of order) { h++; const c = checkTierLimit(typeLabel(d), block, bay, h); if (!c.ok) return { ok: false, reason: c.reason }; }
+  return { ok: true };
+  }
+  function setDropTarget(col) {
+  if (drag.curCol === col) return;
+  clearDropTarget();
+  if (!col) return;
+  const block = col.dataset.block, bay = +col.dataset.bay;
+  let check, newTier;
+  if (drag.group) { check = simulateGroupDrop(drag.groupIds, block, bay); newTier = topTier(block, bay) + drag.groupIds.length; }
+  else { newTier = topTier(block, bay) + 1; check = checkTierLimit(drag.movedName, block, bay, newTier); }
+  drag.curCol = col; drag.canDrop = check.ok; drag.denyReason = check.reason || "";
+  col.classList.add(check.ok ? "drop-target" : "drop-target-deny");
+  const pile = col.querySelector(".pile");
+  const oldH = +pile.style.height.replace("px", "") || 0;
+  const needH = newTier * TSTEP;
+  if (needH > oldH) pile.style.height = needH + "px";
+  const slot = document.createElement("div"); slot.className = "drop-slot" + (check.ok ? "" : " deny"); slot.style.bottom = ((newTier - 1) * TSTEP) + "px";
+  pile.appendChild(slot); drag.slot = slot; drag._pile = pile; drag._oldH = oldH;
+  if (drag.ghost) drag.ghost.classList.toggle("deny", !check.ok);
+  }
+  function clearDropTarget() {
+  if (!drag) return;
+  if (drag.curCol) drag.curCol.classList.remove("drop-target", "drop-target-deny");
+  if (drag.slot) { drag.slot.remove(); drag.slot = null; }
+  if (drag._pile && drag._oldH != null) { drag._pile.style.height = drag._oldH + "px"; drag._pile = null; drag._oldH = null; }
+  drag.curCol = null; drag.canDrop = true; drag.denyReason = "";
+  if (drag.ghost) drag.ghost.classList.remove("deny");
+  }
+  function autoScroll(x, y) {
+  const yr = yard.getBoundingClientRect();
+  if (y < yr.top + 48) yard.scrollTop -= 14; else if (y > yr.bottom - 32) yard.scrollTop += 14;
+  const row = drag.curCol ? drag.curCol.closest(".sb-row") : null;
+  if (row) { const rr = row.getBoundingClientRect(); if (x < rr.left + 40) row.scrollLeft -= 16; else if (x > rr.right - 40) row.scrollLeft += 16; }
+  }
+  function onPointerMove(e) {
+  if (!drag) return;
+  if (!drag.active) { if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > DRAG_THRESHOLD) startDrag(); else return; }
+  moveGhost(e.clientX, e.clientY);
+  setDropTarget(currentDropCol(e.clientX, e.clientY));
+  autoScroll(e.clientX, e.clientY);
+  }
+  function onPointerUp(e) {
+  if (!drag) return;
+  const wasActive = drag.active;
+  const targetCol = drag.curCol; const canDrop = drag.canDrop; const reason = drag.denyReason;
+  const d = drag;
+  if (!wasActive) { const id = d.id; cleanupDrag(); openDrawer(id); return; }
+  if (targetCol && canDrop) {
+  const totalAbove = d.groupIds.reduce((s, id) => s + removedAboveFor(id), 0);
+  const extra = totalAbove > 0 ? ` · снято ${totalAbove} ярус${totalAbove > 1 && totalAbove < 5 ? "а" : totalAbove >= 5 ? "ов" : ""} сверху` : "";
+  const src = DATA.find(x => x.id === d.id);
+  const label = d.group ? `${d.groupIds.length} ярусов → ${targetCol.dataset.block}/${pad2(+targetCol.dataset.bay)}` : `${src.number} → ${targetCol.dataset.block}/${pad2(+targetCol.dataset.bay)}`;
+  performMove(d.groupIds.slice(), targetCol.dataset.block, +targetCol.dataset.bay, label);
+  if (d.group) clearSelection();
+  toast((d.group ? `Переставлено ${d.groupIds.length} ярусов` : `Переставлен ${src.prefix} ${src.number}`) + `: ${label}${extra}`);
+  cleanupDrag(); updateStackHighlights(); syncBulkUI();
+  } else { cleanupDrag(); if (targetCol && !canDrop) toast("Перестановка запрещена: " + reason, true); }
+  }
+  function cleanupDrag() {
+  if (!drag) return;
+  if (drag.ghost) drag.ghost.remove();
+  document.body.classList.remove("dragging-active");
+  clearDropTarget();
+  yard.querySelectorAll(".tier.dragging,.tier.lifted").forEach(t => t.classList.remove("dragging", "lifted"));
+  drag = null;
+  }
+  let marquee = null;
+  function overlap(a, b) { return !(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top); }
+  function onMarqueePointerDown(e) {
+  if (view !== "stacks" || e.button !== 0) return;
+  if (e.target.closest(".tier")) return;
+  if ($("#drawer").classList.contains("open")) return;
+  if (e.target.closest(".yard-bar") || e.target.closest(".undo-rail") || e.target.closest(".yard-legend")) return;
+  marquee = { startX: e.clientX, startY: e.clientY, active: false, el: null, curSel: new Set(), byBlock: new Map(), raf: 0 };
+  e.preventDefault();
+  }
+  function buildMarqueeIndex() {
+  const byBlock = new Map();
+  yard.querySelectorAll(".stack-block").forEach(bl => {
+  const name = bl.dataset.block; const arr = [];
+  bl.querySelectorAll(".tier").forEach(t => arr.push({ el: t, id: +t.dataset.id }));
+  byBlock.set(name, { el: bl, tiers: arr });
+  });
+  marquee.byBlock = byBlock;
+  }
+  function startMarquee() {
+  const m = marquee; m.active = true;
+  buildMarqueeIndex();
+  const el = document.createElement("div"); el.className = "marquee"; document.body.appendChild(el); m.el = el;
+  yard.querySelectorAll(".tier.msel").forEach(t => t.classList.remove("msel"));
+  selectedIds.clear(); syncBulkUI();
+  paintMarquee(m.startX, m.startY);
+  }
+  function paintMarquee(x, y) {
+  const m = marquee;
+  const l = Math.min(m.startX, x), t = Math.min(m.startY, y), r = Math.max(m.startX, x), b = Math.max(m.startY, y);
+  m.el.style.left = l + "px"; m.el.style.top = t + "px"; m.el.style.width = (r - l) + "px"; m.el.style.height = (b - t) + "px";
+  const mrect = { left: l, top: t, right: r, bottom: b };
+  const newSel = new Set();
+  m.byBlock.forEach((info) => {
+  const br = info.el.getBoundingClientRect();
+  if (!overlap(br, mrect)) return;
+  info.tiers.forEach(o => { const tr = o.el.getBoundingClientRect(); if (overlap(tr, mrect)) newSel.add(o.id); });
+  });
+  newSel.forEach(id => { if (!m.curSel.has(id)) { const o = findTierEl(m, id); if (o) o.el.classList.add("marquee-sel"); } });
+  m.curSel.forEach(id => { if (!newSel.has(id)) { const o = findTierEl(m, id); if (o) o.el.classList.remove("marquee-sel"); } });
+  m.curSel = newSel;
+  }
+  function findTierEl(m, id) { for (const info of m.byBlock.values()) { const o = info.tiers.find(t => t.id === id); if (o) return o; } return null; }
+  function marqueeAutoScroll(y) { const yr = yard.getBoundingClientRect(); if (y < yr.top + 44) yard.scrollTop -= 12; else if (y > yr.bottom - 30) yard.scrollTop += 12; }
+  function onMarqueeMove(e) {
+  if (!marquee) return;
+  if (!marquee.active) { if (Math.abs(e.clientX - marquee.startX) + Math.abs(e.clientY - marquee.startY) > DRAG_THRESHOLD) startMarquee(); else return; }
+  marqueeAutoScroll(e.clientY);
+  if (!marquee.raf) { const x = e.clientX, y = e.clientY; marquee.raf = requestAnimationFrame(() => { marquee.raf = 0; paintMarquee(x, y); }); }
+  }
+  function onMarqueeUp(e) {
+  if (!marquee) return;
+  const wasActive = marquee.active; const sel = marquee.curSel;
+  if (marquee.el) marquee.el.remove();
+  if (marquee.raf) { cancelAnimationFrame(marquee.raf); marquee.raf = 0; }
+  marquee = null;
+  if (!wasActive) { clearSelection(); return; }
+  yard.querySelectorAll(".tier.marquee-sel").forEach(t => { t.classList.remove("marquee-sel"); t.classList.add("msel"); });
+  sel.forEach(id => selectedIds.add(id));
+  syncBulkUI();
+  }
+  yard.addEventListener("pointerdown", onTierPointerDown);
+  yard.addEventListener("pointerdown", onMarqueePointerDown);
+  window.addEventListener("pointermove", e => { onPointerMove(e); onMarqueeMove(e); });
+  window.addEventListener("pointerup", e => { onPointerUp(e); onMarqueeUp(e); });
+  window.addEventListener("pointercancel", () => { if (drag && drag.active) cleanupDrag(); if (marquee) { if (marquee.el) marquee.el.remove(); marquee = null; } });
+  function markSel(id) {
+  yard.querySelectorAll(".sel").forEach(e => e.classList.remove("sel"));
+  if (id != null) { const el = yard.querySelector('[data-id="' + id + '"]'); if (el) el.classList.add("sel"); }
+  }
+  function setRole(r) {
+  role = r;
+  document.body.classList.toggle("role-reader", r === "reader");
+  $("#roleOpts").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.role === r));
+  $("#roleWho").textContent = CURRENT_USER;
+  applyRoleToDrawer();
+  syncBulkUI();
+  }
+  function applyRoleToDrawer() {
+  document.querySelectorAll("#drawer [data-w]").forEach(el => { el.disabled = !canWrite(); });
+  document.querySelectorAll("#drawer [data-admin]").forEach(el => { el.disabled = !canAdmin(); });
+  $("#tgl-ret").classList.toggle("locked", !canAdmin());
+  $("#tgl-kgmk").classList.toggle("locked", !canWrite());
+  $("#docAdd").disabled = !canWrite();
+  }
+  function fillSelect(el, items, cur) { el.innerHTML = items.map(t => `<option ${t === cur ? 'selected' : ''}>${t}</option>`).join(""); }
+  function setTab(tab) {
+  drawerTab = tab;
+  $("#drTabs").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.tab === tab));
+  document.querySelectorAll(".tab-pane").forEach(p => p.classList.toggle("on", p.dataset.pane === tab));
+  if (tab === "chain") renderChain();
+  if (tab === "docs") renderDocs();
+  if (tab === "log") renderLog();
+  if (tab === "moves") $("#f-moves").innerHTML = renderMoves(editing ? editing.moveLog : []);
+  }
+  function renderMoves(log) {
+  if (!log || !log.length) return `<div class="mv-empty">Перемещений не зафиксировано</div>`;
+  return log.slice().sort((a, b) => b.at - a.at).map(m =>
+  `<div class="mv"><span class="mv-time">${fmtDate(m.at)}</span>` +
+  `<span class="mv-route">${m.from.block}/${pad2(m.from.bay)}/T${m.from.tier}<span class="arr">→</span>${m.to.block}/${pad2(m.to.bay)}/T${m.to.tier}</span></div>`
+  ).join("");
+  }
+  const CHAIN = [
+  { label: "Взвешивание порожнего контейнера", who: "ТЦ", sm: d => d.tareFact != null ? `тара ${fmt(d.tareFact)} кг` : "масса порожнего не внесена", done: d => d.tareFact != null },
+  { label: "Загрузка продукции + взвешивание гружёного", who: "ВСП / ЦМТО", sm: d => d.gross != null ? `брутто ${fmt(d.gross)} кг` : "продукция не загружена", done: d => d.gross != null },
+  { label: "Акт взвешивания", who: "ЦМТО → ОТК", sm: d => hasDoc(d, "weighing") ? "документ оформлен" : "ожидает оформления", done: d => hasDoc(d, "weighing") },
+  { label: "Хранение / отправка в технологический поток", who: "ЦМТО", sm: d => (d.procState === "storage" || d.procState === "shipment") ? procName(d.procState) : "не определено", done: d => d.procState === "storage" || d.procState === "shipment" },
+  { label: "Повторное взвешивание гружёного", who: "ЦМТО", sm: d => d.grossRepeat != null ? `брутто повторное ${fmt(d.grossRepeat)} кг` : "не выполнялось", done: d => d.grossRepeat != null },
+  { label: "Акт перевески", who: "ЦМТО → ОТК", sm: d => hasDoc(d, "reweigh") ? "документ оформлен" : "не требуется / ожидает", done: d => hasDoc(d, "reweigh") },
+  { label: "Документы о качестве", who: "ОТК", sm: d => hasDoc(d, "quality") ? "оформлены" : "ожидают оформления", done: d => hasDoc(d, "quality") },
+  { label: "Отгрузочные документы", who: "ТЦ", sm: d => hasDoc(d, "shipping") ? "оформлены" : "ожидают оформления", done: d => hasDoc(d, "shipping") },
+  { label: "Отгрузка", who: "ТЦ", sm: d => d.procState === "shipment" ? "отгружен" : "не отгружен", done: d => d.procState === "shipment" },
+  ];
+  function renderChain() {
+  if (!editing) { $("#chainList").innerHTML = ""; return; }
+  let firstActive = true;
+  $("#chainList").innerHTML = CHAIN.map((c, i) => {
+  const done = c.done(editing);
+  const active = !done && firstActive;
+  if (active) firstActive = false;
+  const cls = done ? "done" : (active ? "active" : "wait");
+  return `<div class="step ${cls}" style="animation-delay:${i * 45}ms">
+  <div class="rail"><div class="node"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6 9 17l-5-5"/></svg></div><div class="line"></div></div>
+  <div class="body"><div class="st">${c.label}<span class="who">${c.who}</span></div><div class="sm">${c.sm(editing)}</div></div>
+  </div>`;
+  }).join("");
+  }
+  function renderDocs() {
+  if (!editing) { $("#docsList").innerHTML = ""; $("#docs-count").textContent = ""; return; }
+  editing.docs = editing.docs || [];
+  $("#docs-count").textContent = `Привязано документов: ${editing.docs.length}`;
+  $("#docsList").innerHTML = editing.docs.length ? editing.docs.map((doc, i) => {
+  const ic = CARRIER_ICON[doc.carrier] || CARRIER_ICON.paper;
+  return `<div class="doc" data-i="${i}">
+  <div class="d-top"><span class="d-type">${DOC_TYPES[doc.type] || doc.type}</span>
+  <button class="d-del" data-del="${i}" title="Удалить документ" ${canWrite() ? "" : "disabled"}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button></div>
+  <div class="d-grid">
+  <div class="dg"><label>Номер / идентификатор</label><input data-docnum="${i}" value="${doc.num || ""}" ${canWrite() ? "" : "disabled"}></div>
+  <div class="dg"><label>Дата документа</label><input type="date" data-docdate="${i}" value="${doc.date ? new Date(doc.date).toISOString().slice(0, 10) : ""}" ${canWrite() ? "" : "disabled"}></div>
+  <div class="dg"><label>Тип документа</label><select data-doctype="${i}" ${canWrite() ? "" : "disabled"}>${Object.entries(DOC_TYPES).map(([k, v]) => `<option value="${k}" ${k === doc.type ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+  <div class="dg"><label>Носитель</label><select data-doccarrier="${i}" ${canWrite() ? "" : "disabled"}>${Object.entries(DOC_CARRIERS).map(([k, v]) => `<option value="${k}" ${k === doc.carrier ? "selected" : ""}>${v}</option>`).join("")}</select></div>
+  </div>
+  <span class="carrier-tag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="${ic}"/></svg>${DOC_CARRIERS[doc.carrier] || "—"}</span>
+  </div>`;
+  }).join("") : `<div class="log-empty">Документы не привязаны. Добавьте акт взвешивания / перевески / список МСМ и др.</div>`;
+  $("#docsList").querySelectorAll("[data-docnum]").forEach(inp => inp.oninput = e => { editing.docs[+e.target.dataset.docnum].num = e.target.value; });
+  $("#docsList").querySelectorAll("[data-docdate]").forEach(inp => inp.onchange = e => { const v = e.target.value; editing.docs[+e.target.dataset.docdate].date = v ? new Date(v).getTime() : null; });
+  $("#docsList").querySelectorAll("[data-doctype]").forEach(sel => sel.onchange = e => { editing.docs[+e.target.dataset.doctype].type = e.target.value; renderDocs(); });
+  $("#docsList").querySelectorAll("[data-doccarrier]").forEach(sel => sel.onchange = e => { editing.docs[+e.target.dataset.doccarrier].carrier = e.target.value; renderDocs(); });
+  $("#docsList").querySelectorAll("[data-del]").forEach(b => b.onclick = e => { if (!canWrite()) return; editing.docs.splice(+e.target.closest("[data-del]").dataset.del, 1); renderDocs(); });
+  }
+  function addDoc() {
+  if (!canWrite() || !editing) return;
+  editing.docs = editing.docs || [];
+  editing.docs.push({ type: "weighing", num: `WEIGH-${rndInt(1000, 9999)}/${2026}`, date: Date.now(), carrier: DOC_DEF_CARRIER.weighing });
+  renderDocs();
+  }
+  function renderLog() {
+  if (!editing) { $("#logList").innerHTML = ""; $("#logMeta").innerHTML = ""; return; }
+  $("#logMeta").innerHTML = `<span>Создано: <b>${fmtDate(editing.createdAt)}</b></span><span>Последнее изменение: <b>${fmtDate(editing.updatedAt)}</b></span><span class="ret">Хранение записей — не менее 5 лет (обеспечивается платформой АИС «Техконтроль»)</span>`;
+  const log = (editing.changeLog || []).slice().sort((a, b) => b.at - a.at);
+  $("#logList").innerHTML = log.length ? log.map(l => {
+  const lbl = FIELD_LABELS[l.field] || l.field;
+  return `<div class="le"><div class="lt"><span>${fmtDate(l.at)}</span><span class="u">${l.user}</span></div>
+  <div class="ld"><span class="fld">${lbl}</span>: <span class="from">${l.from || "—"}</span> → <span class="to">${l.to || "—"}</span></div></div>`;
+  }).join("") : `<div class="log-empty">Изменений полей не зафиксировано.</div>`;
+  }
+  function updateMassInfo() {
+  const pw = +$("#f-pw").value || 0, tare = $("#f-tare").value === "" ? null : +$("#f-tare").value, gross = $("#f-gross").value === "" ? null : +$("#f-gross").value;
+  const nEl = $("#f-netto");
+  if (gross != null && tare != null) { const net = gross - tare; nEl.classList.remove("emp"); nEl.querySelector(".nv").textContent = fmt(net) + " кг"; }
+  else { nEl.classList.add("emp"); nEl.querySelector(".nv").textContent = "—"; }
+  const w = $("#w-info");
+  if (pw > 0 && tare != null) {
+  const diff = tare - pw, pct = Math.round(diff / pw * 100);
+  $("#w-info-txt").textContent = `Расхождение трафарет ↔ тара факт.: ${diff >= 0 ? "+" : ""}${fmt(diff)} кг (${pct >= 0 ? "+" : ""}${pct}%). Информационный контроль массы порожнего.`;
+  w.classList.add("show");
+  }
+  else w.classList.remove("show");
+  }
+  function openDrawer(id) {
+      const d = DATA.find(x => x.id === id);
+      if (!d) return;
+
+      clearSelection();
+      selectedId = id;
+      editing = JSON.parse(JSON.stringify(d));
+      editingOld = JSON.parse(JSON.stringify(d));
+      markSel(id);
+
+      const s = STATES[editing.state];
+      $("#drawer").style.setProperty("--c", s.hex);
+      $("#d-pre").textContent = editing.prefix;
+      $("#d-num").textContent = (editing.number || "").slice(0, 6) || "000000";
+
+      // Устанавливаем значения в Combobox и Input
+      $("#f-type").value = editing.typeLegacy || "";
+      $("#f-iso").value = editing.iso || "";
+
+      const cc = computedCheck(editing);
+      const chkEl = $("#d-chk");
+      const shown = editing.number ? editing.number[6] : undefined;
+      chkEl.textContent = shown ?? "–";
+      chkEl.classList.toggle("bad", shown !== undefined && +shown !== cc);
+
+      $("#d-st-dot").style.background = s.color;
+      $("#d-st-name").textContent = s.name;
+
+      const prw = $("#d-prc-wrap");
+      if (editing.procState) {
+          prw.classList.remove("none");
+          $("#d-prc-dot").style.display = "";
+          $("#d-prc-dot").style.background = PROC[editing.procState].color;
+          $("#d-prc-name").textContent = PROC[editing.procState].name;
+          $("#d-prc-name").style.color = PROC[editing.procState].hex;
+      } else {
+          prw.classList.add("none");
+          $("#d-prc-dot").style.display = "none";
+          $("#d-prc-name").textContent = "не в операции";
+          $("#d-prc-name").style.color = "";
+      }
+
+      const loc = $("#d-loc");
+      if (editing.block) {
+          loc.style.display = "";
+          loc.textContent = `секция ${editing.block} · ряд ${pad2(editing.bay)} · ярус ${editing.tier}`;
+      } else {
+          loc.style.display = "none";
+      }
+
+      $("#f-pre").value = editing.prefix;
+      $("#f-num").value = editing.number;
+      $("#f-pw").value = editing.pw;
+      $("#f-tare").value = editing.tareFact == null ? "" : editing.tareFact;
+      $("#f-gross").value = editing.gross == null ? "" : editing.gross;
+      $("#f-grep").value = editing.grossRepeat == null ? "" : editing.grossRepeat;
+
+      fillSelect($("#f-state"), Object.values(STATES).map(s => s.name), s.name);
+      fillSelect($("#f-proc"), ["— не в операции —", ...Object.values(PROC).map(p => p.name)], editing.procState ? PROC[editing.procState].name : "— не в операции —");
+
+      const ownerOpts = OWNERS.length ? OWNERS.map(o => o.fullName) : ["Не назначен"];
+      fillSelect($("#f-owner"), ownerOpts.concat(["Не назначен"]), editing.owner);
+
+      $("#f-kgmk").checked = editing.kgmk;
+      $("#f-ret").checked = editing.retired;
+      $("#f-note").value = editing.note || "";
+
+      applyRoleToDrawer();
+      updateMassInfo();
+      setTab("data");
+
+      $("#drawer").classList.add("open");
+      $("#scrim").classList.add("open");
+      $("#drawer").setAttribute("aria-hidden", "false");
+  }
+  function closeDrawer() { $("#drawer").classList.remove("open"); $("#scrim").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); selectedId = null; markSel(null); editing = null; editingOld = null; }
+  function valFromForm() {
+  const procSel = $("#f-proc").value;
+  const procKey=Object.keys(PROC).find(k=>PROC[k].name===procSel)||"";
+  const stSel = $("#f-state").value;
+  const stKey = Object.keys(STATES).find(k => STATES[k].name === stSel) || "inuse";
+  return {
+        prefix: ($("#f-pre").value || "").toUpperCase().trim(),
+        number: ($("#f-num").value || "").replace(/\D/g, "").trim(),
+        typeLegacy: ($("#f-type").value || "").trim(), // <-- НОВОЕ
+        iso: ($("#f-iso").value || "").toUpperCase().trim(), // <-- НОВОЕ
+        pw: +$("#f-pw").value || 0,
+        tareFact: $("#f-tare").value === "" ? null : +$("#f-tare").value,
+        gross: $("#f-gross").value === "" ? null : +$("#f-gross").value,
+        grossRepeat: $("#f-grep").value === "" ? null : +$("#f-grep").value,
+        state: stKey,
+        procState: procKey,
+        owner: $("#f-owner").value,
+        kgmk: $("#f-kgmk").checked,
+        retired: $("#f-ret").checked,
+        note: $("#f-note").value,
+    };
+  }
+  function liveHeader() {
+  const pre = ($("#f-pre").value || "").toUpperCase().slice(0, 4);
+  const num = ($("#f-num").value || "").replace(/\D/g, "").slice(0, 7);
+  $("#d-pre").textContent = pre || "----"; $("#d-num").textContent = (num || "000000").slice(0, 6);
+  const chkEl = $("#d-chk");
+  if (pre.length === 4 && num.length >= 6) { const c = checkDigit(pre, num.slice(0, 6)); const shown = num[6]; chkEl.textContent = shown ?? "–"; chkEl.classList.toggle("bad", shown !== undefined && +shown !== c); }
+  else { chkEl.textContent = "–"; chkEl.classList.remove("bad"); }
+  const sKey = Object.keys(STATES).find(k => STATES[k].name === $("#f-state").value);
+  if (sKey) { $("#d-st-dot").style.background = STATES[sKey].color; $("#d-st-name").textContent = STATES[sKey].name; $("#drawer").style.setProperty("--c", STATES[sKey].hex); }
+  const procKey = Object.keys(PROC).find(k => PROC[k].name === $("#f-proc").value);
+  const prw = $("#d-prc-wrap");
+  if (procKey) { prw.classList.remove("none"); $("#d-prc-dot").style.display = ""; $("#d-prc-dot").style.background = PROC[procKey].color; $("#d-prc-name").textContent = PROC[procKey].name; $("#d-prc-name").style.color = PROC[procKey].hex; }
+  else { prw.classList.add("none"); $("#d-prc-dot").style.display = "none"; $("#d-prc-name").textContent = "не в операции"; $("#d-prc-name").style.color = ""; }
+  }
+
+  async function saveDrawer(){
+    if(!canWrite()){toast("Недостаточно прав для записи",true);return;}
+    const v=valFromForm();
+    Object.assign(editing, v);
+    editing.updatedAt = Date.now();
+
+    // ... (логика diff и changeLog остается без изменений) ...
+    const diff=[];
+    Object.keys(FIELD_LABELS).forEach(f=>{
+        const oldV=editingOld[f], newV=v[f];
+        const os=f==="kgmk"||f==="retired"?(oldV?"Да":"Нет"):f==="procState"?(procName(oldV)||"—"):(oldV==null?"—":oldV);
+        const ns=f==="kgmk"||f==="retired"?(newV?"Да":"Нет"):f==="procState"?(procName(newV)||"—"):(newV==null?"—":newV);
+        if(String(os)!==String(ns))diff.push({at:Date.now(),user:CURRENT_USER,field:f,from:String(os),to:String(ns)});
+    });
+    const docsChanged=JSON.stringify((editingOld.docs||[]).map(d=>[d.type,d.num,d.carrier]))!==JSON.stringify((editing.docs||[]).map(d=>[d.type,d.num,d.carrier]));
+
+    Object.assign(editing,v);
+    editing.updatedAt=Date.now();
+
+    if(diff.length||docsChanged){
+        editing.changeLog=editing.changeLog||[];
+        diff.forEach(x=>editing.changeLog.push(x));
+        if(docsChanged)editing.changeLog.push({at:Date.now(),user:CURRENT_USER,field:"docs",from:"—",to:`документов: ${(editing.docs||[]).length}`});
+    }
+
+    // Обновляем локальный массив
+    const idx=DATA.findIndex(d=>d.id===editing.id);
+    if(idx>=0) DATA[idx]=JSON.parse(JSON.stringify(editing));
+    else DATA.push(JSON.parse(JSON.stringify(editing)));
+
+    if (dataSource === "db") {
+        try {
+            // Находим ID типа по названию, если возможно
+            let typeId = null;
+            if (window.CONTAINER_TYPES && editing.typeLegacy) {
+                const foundType = window.CONTAINER_TYPES.find(t => t.caption === editing.typeLegacy);
+                if (foundType) typeId = foundType.id;
+            }
+
+            const payload = {
+                numContainer: parseInt(editing.number) || 0,
+                prefix: editing.prefix,       // Передаем строку
+                typeCaption: editing.typeLegacy, // Для поиска/создания типа
+                typeId: window.CONTAINER_TYPES && window.CONTAINER_TYPES.find(t => t.caption === editing.typeLegacy)?.id || null, // <-- ВАЖНО: Передаем ID если нашли
+                isoCode: editing.iso,            // <-- ВАЖНО: Передаем ISO
+
+                state: editing.state,
+                procState: editing.procState,
+
+                tareStencilKg: editing.pw,    // Вес по трафарету
+                tareFactKg: editing.tareFact,
+                grossKg: editing.gross,
+                grossRepeatKg: editing.grossRepeat,
+
+                isKgmk: editing.kgmk,
+                isRetired: editing.retired,
+                notes: editing.note,
+
+                block: editing.block,
+                bay: editing.bay,
+                tier: editing.tier,
+                responsible: editing.owner,
+
+                docs: editing.docs.map(d => ({
+                    type: d.type, num: d.num,
+                    date: d.date ? new Date(d.date).toISOString().split('T')[0] : null,
+                    carrier: d.carrier
+                }))
+            };
+
+            let url = `${API_BASE}/containers/${editing.id}`;
+            let method = 'PUT';
+
+            // Если новый контейнер
+            if (editing.isNew) {
+                url = `${API_BASE}/containers`;
+                method = 'POST';
+            }
+
+            const res = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error("Ошибка сети");
+
+            if (editing.isNew) {
+                const created = await res.json();
+                const localIdx = DATA.findIndex(d => d.id === editing.id);
+                if (localIdx >= 0) {
+                    DATA[localIdx].id = created.id;
+                    DATA[localIdx].isNew = false;
+                }
+            }
+
+            toast("Сохранено в БД");
+        } catch (e) {
+            console.error(e);
+            toast("Ошибка сохранения в БД", true);
+        }
+    }
+
+    closeDrawer(); render(true); refreshFacets();
+}
+
+  let toastT; function toast(t, warn) { $("#toast-txt").textContent = t; $("#toast").classList.toggle("warn", !!warn); $("#toast").classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => $("#toast").classList.remove("show"), warn ? 5500 : 3200); }
+  async function bulkApply() {
+    if (!canWrite()) { toast("Недостаточно прав для записи", true); return; }
+    if (!selectedIds.size) return;
+
+    const st = $("#bb-state").value;
+    const pr = $("#bb-proc").value;
+    const ow = $("#bb-owner").value;
+    const kg = $("#bb-kgmk").value;
+
+    if (!st && !pr && !ow && kg === "") { toast("Выберите хотя бы одно изменение", true); return; }
+
+    const idsToUpdate = Array.from(selectedIds);
+    let successCount = 0;
+
+    // 1. Оптимистичное обновление UI (сразу меняем в DATA)
+    idsToUpdate.forEach(id => {
+        const d = DATA.find(x => x.id === id);
+        if (!d) return;
+        if (st) d.state = st;
+        if (pr) d.procState = pr === "__none" ? "" : pr;
+        if (ow) d.owner = ow;
+        if (kg !== "") d.kgmk = kg === "1";
+    });
+
+    // Перерисовываем (контейнеры перескочат между колонками в группах)
+    buildFacets(); // Обновить счетчики в сайдбаре
+    clearSelection(); // Снять выделение
+    render(false); // Перерисовать двор/группы
+
+    toast(`Обновление ${idsToUpdate.length} контейнеров...`);
+
+    // 2. Отправка на сервер
+    if (dataSource === "db") {
+        try {
+            // Формируем массив payload для каждого контейнера
+            // Так как у нас нет эндпоинта bulk-update, шлем PUT для каждого
+            // (Для большого количества лучше сделать batch endpoint на бэке)
+
+            const promises = idsToUpdate.map(id => {
+                const d = DATA.find(x => x.id === id);
+                if (!d) return Promise.resolve();
+
+                const payload = {
+                    state: d.state,
+                    procState: d.procState,
+                    responsible: d.owner, // В DTO поле responsible
+                    isKgmk: d.kgmk
+                    // Другие поля можно не слать, если бэк игнорит null
+                };
+
+                return fetch(`${API_BASE}/containers/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).then(res => {
+                    if (res.ok) successCount++;
+                    else throw new Error(`Failed for ${id}`);
+                });
+            });
+
+            await Promise.all(promises);
+            toast(`Успешно обновлено: ${successCount}`);
+            refreshFacets();
+        } catch (e) {
+            console.error(e);
+            toast("Ошибка при сохранении части контейнеров", true);
+            // Здесь можно было бы сделать rollback, но это сложно для bulk
+        }
+    } else {
+        toast(`Обновлено (демо): ${idsToUpdate.length}`);
+    }
+
+    // Сброс селектов в панели
+    ["#bb-state", "#bb-proc", "#bb-owner", "#bb-kgmk"].forEach(s => { $(s).value = ""; $(s).classList.remove("touched"); });
+}
+
+  async function applyPlan() {
+    if (!planMode) return;
+
+    try {
+        // Отправляем команду применения
+        const res = await fetch(`${API_BASE}/containers/plans/apply`, { method: 'POST' });
+        if (!res.ok) throw new Error("Failed to apply");
+
+        // Возвращаем UI в обычное состояние
+        planMode = false;
+        PLAN_DATA.clear(); // Планы стали фактом, кэш больше не нужен
+
+        yardWrap.classList.remove("plan-mode");
+        yard.classList.remove("plan-mode");
+
+        const btn = $("#planBtn");
+        btn.classList.remove("plan-on");
+        btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19"/><circle cx="12" cy="12" r="3.2"/></svg>План`;
+
+        const cancelBtn = $("#cancelPlanBtn");
+        if(cancelBtn) cancelBtn.style.display = "none";
+
+        toast("План применён! Перезагрузка данных...");
+
+        // Перезагружаем данные с сервера, чтобы увидеть новый факт
+        DATA = [];
+        LAYOUT = new Map();
+        pagination.page = 0;
+        pagination.hasMore = true;
+        await loadPage(0);
+
+    } catch (e) {
+        console.error(e);
+        toast("Ошибка применения плана", true);
+    }
+}
+
+  function cancelPlan() {
+    if (!planMode) return;
+
+    // Возвращаем фактические данные
+    DATA = JSON.parse(JSON.stringify(factData)); // Глубокая копия, чтобы не ссылаться на один объект
+    planMode = false;
+
+    // Кэш планов можно очистить, так как мы вышли из режима.
+    // При следующем входе enterPlan снова загрузит их с сервера.
+    PLAN_DATA.clear();
+
+    yardWrap.classList.remove("plan-mode");
+    yard.classList.remove("plan-mode");
+
+    const btn = $("#planBtn");
+    btn.classList.remove("plan-on");
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l2.5 2.5M16.5 16.5 19 19M19 5l-2.5 2.5M7.5 16.5 5 19"/><circle cx="12" cy="12" r="3.2"/></svg>План`;
+
+    const cancelBtn = $("#cancelPlanBtn");
+    if(cancelBtn) cancelBtn.style.display = "none";
+
+    toast("План отменён. Возврат к факту.");
+    render(false);
+}
+  function openAnalytics() {
+  renderAnalytics();
+  $("#analytics").classList.add("open"); $("#analytics").setAttribute("aria-hidden", "false");
+  $("#axScrim").classList.add("open");
+  $("#analytics").classList.toggle("in-plan", planMode);
+  }
+  function closeAnalytics() { $("#analytics").classList.remove("open"); $("#analytics").setAttribute("aria-hidden", "true"); $("#axScrim").classList.remove("open"); }
+  function heatColor(p) { const h = 120 - (Math.min(1, p) * 120); return `hsl(${h} 62% 42%)`; }
+  function renderAnalytics() {
+  const blocks = groupBlocks();
+  const blockNames = [...LAYOUT.keys()].sort((a, b) => a.localeCompare(b));
+  const heat = blockNames.map(name => {
+  const bays = blocks.get(name) || new Map(); let total = 0, prob = 0;
+  bays.forEach(arr => arr.forEach(d => { total++; if (isProblem(d)) prob++; }));
+  const p = total ? prob / total : 0; return { name, total, prob, p };
+  });
+  $("#ax-heat-q").textContent = `проблемных ярусов · всего ${pagination.totalElements || DATA.length}`;
+  $("#ax-heat-list").innerHTML = heat.map(h => {
+  const pct = Math.round(h.p * 100);
+  return `<div class="heat-row" data-block="${h.name}"><span class="hb">${h.name}</span>
+  <div class="hbar"><i style="background:${heatColor(h.p)}" data-w="${pct}"></i></div>
+  <span class="hpct">${h.prob}/${h.total}</span></div>`;
+  }).join("");
+  requestAnimationFrame(() => $("#ax-heat-list").querySelectorAll(".hbar i").forEach(i => i.style.width = Math.max(3, +i.dataset.w) + "%"));
+  $("#ax-heat-list").querySelectorAll(".heat-row").forEach(r => r.onclick = () => { closeAnalytics(); aimBlock(r.dataset.block); });
+  const bn = [];
+  blocks.forEach(bays => bays.forEach(arr => {
+  const maxT = arr.length ? Math.max(...arr.map(d => d.tier)) : 0;
+  arr.forEach(d => { if (isProblem(d)) { const buried = maxT - d.tier; bn.push({ d, buried, score: buried + (d.state === "damaged" ? 2 : 1) }); } });
+  }));
+  bn.sort((a, b) => b.score - a.score);
+  const top = bn.slice(0, 12);
+  $("#ax-bn-q").textContent = bn.length ? `${bn.length} шт.` : "нет";
+  $("#ax-bn-list").innerHTML = top.length ? top.map(o => {
+  const s = STATES[o.d.state];
+  return `<div class="bn"><span class="sw" style="background:${s.color}"></span>
+  <span class="bn-id">${o.d.prefix} ${o.d.number} · ${o.d.block}/${pad2(o.d.bay)}/T${o.d.tier}</span>
+  <span class="bn-cost">снять ${o.buried}</span></div>`;
+  }).join("") : `<div class="ax-empty">Проблемных ярусов под завалом нет — двор в порядке.</div>`;
+  const buckets = [0, 0, 0, 0]; let stacks = 0;
+  blocks.forEach(bays => bays.forEach(arr => {
+  if (!arr.length) return; stacks++;
+  const cur = Math.max(...arr.map(d => d.tier));
+  const cap = Math.min(...arr.map(d => tierLimitByItem(d)));
+  const free = Math.max(0, cap - cur);
+  buckets[Math.min(3, free)]++;
+  }));
+  const labels = ["0 (впритык)", "1", "2", "3+"];
+  const colors = ["var(--danger)", "#d98200", "var(--accent)", "#3a9c8c"];
+  const maxB = Math.max(1, ...buckets);
+  $("#ax-hist").innerHTML = buckets.map((v, i) => {
+  const hp = Math.round(v / maxB * 100);
+  return `<div class="col"><span class="cv">${v}</span><div class="bar" style="background:${colors[i]}" data-h="${hp}"></div><span class="cl">${labels[i]}</span></div>`;
+  }).join("");
+  requestAnimationFrame(() => $("#ax-hist").querySelectorAll(".bar").forEach(b => b.style.height = Math.max(4, +b.dataset.h) + "%"));
+  $("#ax-sub").textContent = `${blockNames.length} секций · ${stacks} штабелей` + (planMode ? " · черновик" : "");
+  }
+  function aimBlock(name) {
+  if (view !== "stacks") return;
+  const bl = yard.querySelector('.stack-block[data-block="' + name + '"]');
+  if (bl) { bl.scrollIntoView({ block: "center", behavior: "smooth" }); bl.classList.remove("aim"); void bl.offsetWidth; bl.classList.add("aim"); setTimeout(() => bl.classList.remove("aim"), 1400); }
+  }
+  function findFreeSlot(caption) {
+  for (const [n, lay] of LAYOUT) { for (const bn of lay.bays) { const nt = topTier(n, bn) + 1; if (checkTierLimit(caption, n, bn, nt).ok) return { block: n, bay: bn, tier: nt }; } }
+  return { block: [...LAYOUT.keys()][0] || "A", bay: 1, tier: 1 };
+  }
+  function buildLegend() {
+  $("#yardLegend").innerHTML = Object.values(STATES).map(s => `<div class="lg-row"><span class="sw" style="background:${s.color}"></span>${s.name}</div>`).join("") +
+  `<div class="lg-row" style="margin-top:4px;border-top:1px dashed var(--line);padding-top:6px"><span class="sw" style="background:var(--pr-weigh)"></span>взвешивание</div>` +
+  `<div class="lg-row"><span class="sw" style="background:var(--pr-store)"></span>хранение</div>` +
+  `<div class="lg-row"><span class="sw" style="background:var(--pr-ship)"></span>отгрузка</div>`;
+  }
+
+  /* ============================================================
+  SLOT PICKER LOGIC
+  ============================================================ */
+  let currentSlotTarget = null;
+  let slotSearchTimeout = null;
+  window.openSlotPicker = function(block, bay, tier) {
+  currentSlotTarget = { block, bay, tier };
+  document.getElementById('slotTargetInfo').textContent = `Цель: Секция ${block} · Ряд ${pad2(bay)} · Ярус ${tier}`;
+  const input = document.getElementById('slotSearchInput');
+  const list = document.getElementById('slotResultsList');
+  input.value = "";
+  list.innerHTML = `<div style="text-align: center; color: var(--muted); padding: 20px;">Введите номер для поиска...</div>`;
+  const modal = document.getElementById('slotPicker');
+  const scrim = document.getElementById('slotScrim');
+  modal.style.display = 'flex';
+  setTimeout(() => modal.classList.add("open"), 10);
+  scrim.style.display = 'block';
+  setTimeout(() => scrim.classList.add("open"), 10);
+  setTimeout(() => input.focus(), 100);
+  };
+  function closeSlotPicker() {
+  const modal = document.getElementById('slotPicker');
+  const scrim = document.getElementById('slotScrim');
+  modal.classList.remove("open");
+  scrim.classList.remove("open");
+  setTimeout(() => { modal.style.display = 'none'; scrim.style.display = 'none'; }, 300);
+  currentSlotTarget = null;
+  }
+  document.getElementById('slotSearchInput').addEventListener('input', function(e) {
+  const query = e.target.value.trim();
+  const list = document.getElementById('slotResultsList');
+  clearTimeout(slotSearchTimeout);
+  if (!query) { list.innerHTML = `<div style="text-align: center; color: var(--muted); padding: 20px;">Введите номер...</div>`; return; }
+  list.innerHTML = `<div style="text-align: center; color: var(--muted); padding: 20px;">Поиск в БД...</div>`;
+  slotSearchTimeout = setTimeout(async () => {
+  try {
+  const res = await fetch(`${API_BASE}/containers?query=${encodeURIComponent(query)}&page=0&size=50`);
+  if (!res.ok) throw new Error("API Error");
+  const json = await res.json();
+  if (json.length === 0) { list.innerHTML = `<div style="text-align: center; color: var(--muted); padding: 20px;">Ничего не найдено в БД</div>`; return; }
+  list.innerHTML = json.map(x => {
+  const d = mapDto(x);
+  const s = STATES[d.state] || STATES.free;
+  const currentLoc = d.block ? `${d.block}/${pad2(d.bay)}/T${d.tier}` : "Без координат";
+  const isSameSpot = (d.block === currentSlotTarget.block && d.bay === currentSlotTarget.bay && d.tier === currentSlotTarget.tier);
+  return `
+  <div class="row" style="height: auto; padding: 10px; margin-bottom: 0; cursor: ${isSameSpot ? 'not-allowed' : 'pointer'}; opacity: ${isSameSpot ? '0.5' : '1'};"
+  ${!isSameSpot ? `onclick="moveContainerFromDB(${d.id})"` : ''}>
+  <div class="mini" style="--c:${s.color}"></div>
+  <div class="id" style="min-width: 120px;">
+  <div class="pn">${d.prefix} ${d.number}</div>
+  <div class="ty">${d.typeLegacy || '—'}</div>
+  </div>
+  <div style="flex:1; font-size: 12px; color: var(--muted);">
+  Сейчас: <b style="color:var(--ink-soft)">${currentLoc}</b>
+  </div>
+  <div style="font-size: 12px; color: var(--accent); font-weight: 600;">
+  ${isSameSpot ? 'Уже здесь' : `→ ${currentSlotTarget.block}/${pad2(currentSlotTarget.bay)}/T${currentSlotTarget.tier}`}
+  </div>
+  </div>`;
+  }).join("");
+  } catch (err) { console.error(err); list.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 20px;">Ошибка поиска</div>`; }
+  }, 300);
+  });
+  window.moveContainerFromDB = async function(containerId) {
+    if (!currentSlotTarget) return;
+    const target = currentSlotTarget;
+    try {
+        const payload = { block: target.block, bay: target.bay, tier: target.tier };
+        const res = await fetch(`${API_BASE}/containers/${containerId}`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error("Save failed");
+
+        // Обновляем локальные данные
+        const localContainer = DATA.find(d => d.id === containerId);
+        if (localContainer) {
+            if (localContainer.block && localContainer.bay) compactStack(localContainer.block, localContainer.bay);
+            localContainer.block = target.block;
+            localContainer.bay = target.bay;
+            localContainer.tier = target.tier;
+        } else {
+            // Если контейнера не было в текущей выгрузке (например, он был на 2-й странице, а мы загрузили только 1-ю),
+            // нам нужно его добавить. Но у нас нет полных данных о нем (номер, тип и т.д.).
+            // В идеале — сделать запрос GET /api/containers/{id} и получить полный объект.
+            // Но для быстрого фикса добавим "заглушку", которая обновится при скролле/релоаде.
+            // ЛУЧШЕ: Сделаем быстрый запрос за данными этого контейнера.
+
+            try {
+                // Пытаемся найти его в общей базе (если API позволяет поиск по ID, но у нас поиск по query)
+                // Просто добавим минимум, чтобы отрисовать.
+                // Но так как мы в режиме onlyPlaced, он теперь "видим".
+
+                // Давай просто перезагрузим текущий блок данных, чтобы подтянуть свежий контейнер корректно?
+                // Или добавим фейковый, а при рендере он подхватится?
+                // Нет, лучше добавить фейковый, а пользователь увидит номер после F5.
+                // ИЛИ: сделаем reload страницы.
+
+                // Вариант "Про": запросить конкретный контейнер. У тебя нет GET /{id}, но есть поиск.
+                // Мы не знаем номер.
+                // Поэтому просто добавим заглушку.
+                DATA.push({
+                    id: containerId, block: target.block, bay: target.bay, tier: target.tier,
+                    state: 'inuse', number: '...', prefix: '...', owner: '...', kgmk: false, retired: false,
+                    docs: [], moveLog: [], changeLog: [], typeLegacy: '...'
+                });
+
+                const dataRes = await fetch(`${API_BASE}/containers/${containerId}`);
+                if (dataRes.ok) {
+                    const fullData = await dataRes.json();
+                    const mapped = mapDto(fullData); // Используем твой маппер
+
+                    const existingIdx = DATA.findIndex(d => d.id === containerId);
+                    if (existingIdx >= 0) {
+                        DATA[existingIdx] = mapped; // Обновляем существующий
+                    } else {
+                        DATA.push(mapped); // Добавляем новый
+                    }
+
+                    // Обновляем LAYOUT
+                    if (mapped.block) {
+                        if (!LAYOUT.has(mapped.block)) LAYOUT.set(mapped.block, { bays: new Set() });
+                        LAYOUT.get(mapped.block).bays.add(mapped.bay);
+                    }
+                    closeSlotPicker();
+                    toast(`Контейнер ${mapped.prefix} ${mapped.number} установлен`);
+
+                    // Принудительно перерисовываем штабели
+                    renderStacks();
+                    updateStackHighlights();
+                }
+            } catch(e) { console.warn("Не удалось подтянуть данные нового контейнера", e); }
+        }
+
+    } catch (e) { console.error(e); toast("Ошибка сохранения в БД", true); }
+};
+  const slotCloseBtn = document.getElementById('slotPickerCloseBtn');
+  const slotScrimEl = document.getElementById('slotScrim');
+  if(slotCloseBtn) slotCloseBtn.onclick = closeSlotPicker;
+  if(slotScrimEl) slotScrimEl.onclick = closeSlotPicker;
+
+  /* ============================================================
+  EVENT LISTENERS & INIT
+  ============================================================ */
+  $("#drDelete").onclick = async () => {
+    // Проверка прав (удалять может только админ или редактор)
+    if (!canWrite()) {
+        toast("Недостаточно прав для удаления", true);
+        return;
+    }
+    if (!editing) return;
+
+    // Подтверждение
+    if (!confirm(`Вы уверены, что хотите удалить контейнер ${editing.prefix} ${editing.number}? Это действие необратимо.`)) return;
+
+    try {
+        if (dataSource === "db") {
+            // Если контейнер новый (еще не сохранен в БД), просто удаляем из памяти
+            // Иначе шлем DELETE запрос
+            if (!editing.isNew) {
+                const res = await fetch(`${API_BASE}/containers/${editing.id}`, {
+                    method: 'DELETE'
+                });
+                if (!res.ok) throw new Error("Ошибка удаления на сервере");
+            }
+        }
+
+        // Удаляем из локального массива DATA
+        const idx = DATA.findIndex(d => d.id === editing.id);
+        if (idx >= 0) DATA.splice(idx, 1);
+
+        // Закрываем карточку
+        closeDrawer();
+
+        // Обновляем интерфейс
+        toast("Контейнер удален");
+        render(true); // Перерисовать всё
+        refreshFacets(); // Обновить счетчики в фильтрах
+
+    } catch (e) {
+        console.error(e);
+        toast("Ошибка удаления: " + e.message, true);
+    }
+};
+  $("#viewSeg").querySelectorAll("button").forEach(b => b.onclick = () => {
+    if (drag) cleanupDrag();
+    if (marquee) { if (marquee.el) marquee.el.remove(); marquee = null; }
+    clearSelection();
+
+    const newView = b.dataset.view;
+    const oldView = view;
+    view = newView;
+
+    $("#viewSeg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+
+    // ЕСЛИ МЫ ПЕРЕКЛЮЧИЛИСЬ НА ШТАБЕЛИ ИЛИ С ШТАБЕЛЕЙ - НАДО ПЕРЕЗАГРУЗИТЬ ДАННЫЕ
+    // Потому что изменился набор данных (с координатами vs все)
+    if ((newView === 'stacks' && oldView !== 'stacks') || (newView !== 'stacks' && oldView === 'stacks')) {
+        // Сбрасываем пагинацию и данные
+        DATA = [];
+        LAYOUT = new Map(); // Очищаем layout, чтобы перестроить чисто под новый набор
+        pagination.page = 0;
+        pagination.hasMore = true;
+
+        // Показываем лоадер или просто очищаем двор
+        yard.innerHTML = `<div class="empty">Загрузка данных двора...</div>`;
+
+        // Загружаем первую страницу с новым флагом
+        loadPage(0);
+    } else {
+        render(true);
+    }
+});
+  let searchT;
+$("#search").addEventListener("input", e => {
+    clearTimeout(searchT);
+    const v = e.target.value;
+
+    searchT = setTimeout(() => {
+        query = v;
+
+        // Если мы в режиме штабелей или списков и есть поисковый запрос
+        // Нам нужно перезагрузить данные с сервера, чтобы найти контейнеры, которых нет в текущей выборке
+        if (query.length > 0) {
+            // Сбрасываем пагинацию и данные
+            DATA = [];
+            LAYOUT = new Map(); // Очищаем layout, чтобы перестроить под результаты поиска
+            pagination.page = 0;
+            pagination.hasMore = true;
+
+            // Если мы в режиме "Штабели", временно отключаем фильтр onlyPlaced для поиска,
+            // ИЛИ оставляем, если хотим искать только среди расставленных.
+            // Обычно поиск ищет везде. Но для штабелей нам нужны координаты.
+            // Оставим логику loadPage как есть (она сама решит про onlyPlaced).
+
+            loadPage(0);
+        } else {
+            // Если поиск очистили — перезагружаем всё заново (сброс фильтров)
+            DATA = [];
+            LAYOUT = new Map();
+            pagination.page = 0;
+            pagination.hasMore = true;
+            loadPage(0);
+        }
+    }, 400); // Увеличил задержку до 400мс, чтобы не спамить запросами при быстром вводе
+});
+  $("#sortSel").addEventListener("change", e => { sort = e.target.value; if (view !== "stacks") render(true); });
+  $("#resetBtn").onclick = () => { filters.state.clear(); filters.proc.clear(); filters.type.clear(); filters.own.clear(); query = ""; $("#search").value = ""; document.querySelectorAll(".chip.active").forEach(c => c.classList.remove("active")); applyChange(true); };
+  $("#undoBtn").onclick = undoLastMove;
+  $("#redoBtn").onclick = redoLastMove;
+  $("#planBtn").onclick = async () => {
+    if (!canWrite()) { toast("Недостаточно прав", true); return; }
+    if (!planMode) {
+        await enterPlan();
+    } else {
+        if (confirm("Применить план к фактическому размещению?")) {
+            await applyPlan();
+        }
+    }
+};
+
+// ОБРАБОТЧИК ДЛЯ КНОПКИ ОТМЕНЫ
+$("#cancelPlanBtn").onclick = async () => {
+    if (confirm("Отменить все изменения в плане и вернуться к факту?")) {
+        await cancelPlan();
+    }
+};
+  $("#analyticsBtn").onclick = openAnalytics;
+  $("#axClose").onclick = closeAnalytics; $("#axScrim").onclick = closeAnalytics;
+  $("#roleOpts").querySelectorAll("button").forEach(b => b.onclick = () => setRole(b.dataset.role));
+  $("#drTabs").querySelectorAll("button").forEach(b => b.onclick = () => setTab(b.dataset.tab));
+  $("#drClose").onclick = closeDrawer; $("#scrim").onclick = closeDrawer; $("#drCancel").onclick = closeDrawer; $("#drSave").onclick = saveDrawer;
+  $("#docAdd").onclick = addDoc;
+  ["#f-pre", "#f-num"].forEach(s => $(s).addEventListener("input", liveHeader));
+  $("#f-state").addEventListener("change", liveHeader);
+  $("#f-proc").addEventListener("change", liveHeader);
+  ["#f-pw", "#f-tare", "#f-gross", "#f-grep"].forEach(s => $(s).addEventListener("input", updateMassInfo));
+  $("#bb-apply").onclick = bulkApply;
+  $("#bb-close").onclick = clearSelection;
+  ["#bb-state", "#bb-proc", "#bb-owner", "#bb-kgmk"].forEach(s => $(s).addEventListener("change", e => e.target.classList.toggle("touched", e.target.value !== "")));
+  $("#newBtn").onclick = async () => {
+    if (!canWrite()) { toast("Недостаточно прав для создания", true); return; }
+
+    // 1. Генерируем временный объект для формы
+    const nid = Math.max(0, ...DATA.map(d => d.id)) + 1; // Временный ID
+    const caption = "";
+    const slot = findFreeSlot(caption);
+
+    // Начальные данные
+    const nd = {
+        id: nid, // Временный
+        prefix: PREFIXES.length ? PREFIXES[0] : "NMKU",
+        number: "", // Пользователь введет сам
+        iso: "",
+        typeLegacy: caption,
+        pw: typeAttrs(caption).pw,
+        tareFact: null,
+        gross: null,
+        grossRepeat: null,
+        state: "inuse",
+        procState: "",
+        owner: OWNERS.length ? OWNERS[0].fullName : "Не назначен",
+        kgmk: true,
+        retired: false,
+        block: slot.block,
+        bay: slot.bay,
+        tier: slot.tier,
+        docs: [],
+        moveLog: [],
+        changeLog: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        note: ""
+    };
+
+    // 2. Добавляем в DATA и открываем Drawer
+    // Мы добавляем его временно, чтобы пользователь мог заполнить форму
+    DATA.push(JSON.parse(JSON.stringify(nd)));
+    openDrawer(nid);
+
+    // 3. Меняем логику кнопки "Сохранить" в Drawer
+    // Сейчас saveDrawer делает PUT (обновление).
+    // Нам нужно, чтобы для НОВОГО контейнера (у которого ID временный или нет в БД) делался POST.
+    // Проще всего проверить: если ID > текущего максимума в БД или если это новый объект.
+    // Но надежнее: добавить флаг isNew.
+    editing.isNew = true;
+};
+document.addEventListener("keydown", e => {
+    if (e.key === "Escape") {
+        if (planMode) { cancelPlan(); return; } // <-- Добавили отмену плана по Esc
+        if ($("#analytics").classList.contains("open")) closeAnalytics();
+        else if (drag && drag.active) cleanupDrag();
+        else if (marquee) { if (marquee.el) marquee.el.remove(); marquee = null; clearSelection(); }
+        else if ($("#drawer").classList.contains("open")) closeDrawer();
+        else if (selectedIds.size) clearSelection();
+    }
+  });
+  new ResizeObserver(() => { if (view === "yard" && yard._v) yard._v.refreshCols(yardCols()); }).observe(yard);
+
+  // Инициализация селектов bulk bar (будут перезаписаны при загрузке словарей, но нужны дефолтные)
+  $("#bb-state").innerHTML = `<option value="">— не менять —</option>` + Object.entries(STATES).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join("");
+  $("#bb-proc").innerHTML = `<option value="">— не менять —</option><option value="__none">не в операции</option>` + Object.entries(PROC).map(([k, s]) => `<option value="${k}">${s.name}</option>`).join("");
+  $("#bb-owner").innerHTML = `<option value="">— не менять —</option>`; // Заполнится в loadDictionaries
+  $("#bb-kgmk").innerHTML = `<option value="">— не менять —</option><option value="1">Да</option><option value="0">Нет</option>`;
+
+  buildLegend();
+
+  function gboxHTMLInteractive(d) {
+    const isSel = selectedIds.has(d.id);
+    return `<div class="gbox ${isSel ? 'bulk-sel' : ''} ${d.id === selectedId ? 'sel' : ''}"
+        style="--c:${STATES[d.state].color}"
+        data-id="${d.id}"
+        draggable="${canWrite() ? 'true' : 'false'}"
+        ondragstart="onGroupDragStart(event, ${d.id})"
+        onclick="toggleGroupSelection(event, ${d.id})">
+        <div class="pn">${d.prefix} ${d.number}</div>
+        <div class="sub"><span>${typeLabel(d)}</span><span>${fmt(dispWeight(d))} кг</span></div>
+    </div>`;
+}
+
+// Обработчик клика для выделения
+window.toggleGroupSelection = function(e, id) {
+    // Если клик был частью drag&drop, игнорируем
+    if (e.defaultPrevented) return;
+
+    // Если зажат Ctrl/Cmd или мы уже в режиме выделения — добавляем в список
+    // Или просто всегда добавляем/убираем из списка для удобства
+    if (selectedIds.has(id)) {
+        selectedIds.delete(id);
+    } else {
+        selectedIds.add(id);
+    }
+
+    // Перерисовываем группы, чтобы обновить классы .bulk-sel
+    // Важно: передаем false, чтобы не сбрасывать скролл
+    renderGroups(getFiltered(), false);
+
+    // Обновляем UI панели массовых операций
+    syncBulkUI();
+};
+
+  // Инициализация
+  (async function init() {
+    await loadData(); // Внутри loadData теперь вызывается loadDictionaries
+    initCombobox('f-pre', 'list-prefix', 'cb-prefix', () => PREFIXES);
+    // --- ИНИЦИАЛИЗАЦИЯ COMBOBOX ---
+    // Для Префикса: берем данные из массива PREFIXES
+    initCombobox('f-pre', 'list-prefix', 'cb-prefix', () => PREFIXES);
+
+    // Для Типа: берем данные из window.CONTAINER_TYPES (или DEMO_TYPES если пусто)
+    initCombobox('f-type', 'list-type', 'cb-type', () => {
+        return window.CONTAINER_TYPES ? window.CONTAINER_TYPES : DEMO_TYPES.map(t => ({caption: t}));
+    });
+    // -----------------------------
+    initCombobox('f-owner', 'list-owner', 'cb-owner', () => OWNERS.map(o => o.fullName));
+    await loadStats();
+    setupInfiniteScroll();
+    buildFacets();
+    setRole("editor");
+    render(true);
+  })();
+</script>
+</body>
+</html>
