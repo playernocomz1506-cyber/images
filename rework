@@ -1,12 +1,13 @@
-let searchT;
+$("#resetBtn").onclick = () => {
+    filters.state.clear();
+    filters.proc.clear();
+    filters.type.clear();
+    filters.own.clear();
 
-$("#search").addEventListener("input", e => {
-    clearTimeout(searchT);
+    query = "";
+    $("#search").value = "";
 
-    const v = e.target.value;
+    document.querySelectorAll(".chip.active").forEach(c => c.classList.remove("active"));
 
-    searchT = setTimeout(() => {
-        query = v.trim();
-        applyChange(true);
-    }, 150);
-});
+    applyChange(true);
+};
