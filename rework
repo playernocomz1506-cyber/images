@@ -1,156 +1,52 @@
-async function saveDrawer() {
-    if (!canWrite()) {
-        toast("Недостаточно прав для записи", true);
-        return;
-    }
+window.moveContainerFromDB = async function(containerId) {
+    if (!currentSlotTarget) return;
 
-    if (!editing) return;
-
-    const v = valFromForm();
-
-    const diff = [];
-
-    Object.keys(FIELD_LABELS).forEach(f => {
-        const oldV = editingOld[f];
-        const newV = v[f];
-
-        const os = f === "kgmk" || f === "retired"
-            ? (oldV ? "Да" : "Нет")
-            : f === "procState"
-                ? (procName(oldV) || "—")
-                : (oldV == null ? "—" : oldV);
-
-        const ns = f === "kgmk" || f === "retired"
-            ? (newV ? "Да" : "Нет")
-            : f === "procState"
-                ? (procName(newV) || "—")
-                : (newV == null ? "—" : newV);
-
-        if (String(os) !== String(ns)) {
-            diff.push({
-                at: Date.now(),
-                user: CURRENT_USER,
-                field: f,
-                from: String(os),
-                to: String(ns)
-            });
-        }
-    });
-
-    const docsChanged =
-        JSON.stringify((editingOld.docs || []).map(d => [d.type, d.num, d.carrier, d.date])) !==
-        JSON.stringify((editing.docs || []).map(d => [d.type, d.num, d.carrier, d.date]));
-
-    Object.assign(editing, v);
-    editing.updatedAt = Date.now();
-
-    if (diff.length || docsChanged) {
-        editing.changeLog = editing.changeLog || [];
-        diff.forEach(x => editing.changeLog.push(x));
-
-        if (docsChanged) {
-            editing.changeLog.push({
-                at: Date.now(),
-                user: CURRENT_USER,
-                field: "docs",
-                from: "—",
-                to: `документов: ${(editing.docs || []).length}`
-            });
-        }
-    }
-
-    if (dataSource !== "db") {
-        const idx = DATA.findIndex(d => d.id === editing.id);
-        if (idx >= 0) DATA[idx] = JSON.parse(JSON.stringify(editing));
-        else DATA.push(JSON.parse(JSON.stringify(editing)));
-
-        toast("Сохранено локально");
-        closeDrawer();
-        buildFacets();
-        render(true);
-        return;
-    }
+    const target = currentSlotTarget;
 
     try {
-        const foundType = (window.CONTAINER_TYPES || [])
-            .find(t => t.caption === editing.typeLegacy);
-
         const payload = {
-            numContainer: parseInt(editing.number, 10) || 0,
-            prefix: editing.prefix,
-
-            typeId: foundType ? foundType.id : null,
-            typeCaption: editing.typeLegacy || "",
-            isoCode: editing.iso || "",
-
-            state: editing.state,
-            procState: editing.procState,
-
-            tareStencilKg: editing.pw,
-            tareFactKg: editing.tareFact,
-            grossKg: editing.gross,
-            grossRepeatKg: editing.grossRepeat,
-
-            isKgmk: editing.kgmk,
-            isRetired: editing.retired,
-
-            notes: editing.note,
-
-            block: editing.block,
-            bay: editing.bay,
-            tier: editing.tier,
-
-            responsible: editing.owner,
-
-            docs: (editing.docs || []).map(d => ({
-                type: d.type,
-                num: d.num,
-                date: d.date ? new Date(d.date).toISOString() : null,
-                carrier: d.carrier
-            }))
+            block: target.block,
+            bay: target.bay,
+            tier: target.tier
         };
 
-        const isNew = !!editing.isNew;
-
-        const url = isNew
-            ? `${API_BASE}/containers`
-            : `${API_BASE}/containers/${editing.id}`;
-
-        const method = isNew ? "POST" : "PUT";
-
-        const res = await fetch(url, {
-            method,
+        const res = await fetch(`${API_BASE}/containers/${containerId}`, {
+            method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload)
         });
 
-        if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(text || "Ошибка сохранения");
+        if (!res.ok) throw new Error("Ошибка сохранения координат");
+
+        let mapped = null;
+
+        const dataRes = await fetch(`${API_BASE}/containers/${containerId}`);
+        if (dataRes.ok) {
+            mapped = mapDto(await dataRes.json());
         }
 
-        const savedDto = await res.json();
-        const saved = mapDto(savedDto);
+        const existingIdx = DATA.findIndex(d => d.id === containerId);
 
-        const oldId = editing.id;
-        const localIdx = DATA.findIndex(d => d.id === oldId);
-
-        if (localIdx >= 0) {
-            DATA[localIdx] = saved;
-        } else {
-            DATA.push(saved);
+        if (mapped) {
+            if (existingIdx >= 0) DATA[existingIdx] = mapped;
+            else DATA.push(mapped);
+        } else if (existingIdx >= 0) {
+            DATA[existingIdx].block = target.block;
+            DATA[existingIdx].bay = target.bay;
+            DATA[existingIdx].tier = target.tier;
         }
 
         LAYOUT = buildLayoutFromData(DATA);
 
-        toast(isNew ? "Контейнер создан" : "Сохранено в БД");
+        closeSlotPicker();
 
-        closeDrawer();
+        toast("Контейнер установлен");
+
         buildFacets();
-        render(true);
+        render(false);
 
     } catch (e) {
         console.error(e);
-        toast("Ошибка сохранения в БД: " + e.message, true);
+        toast("Ошибка установки контейнера", true);
     }
-}
+};
