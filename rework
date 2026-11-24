@@ -1,18 +1,32 @@
-$("#viewSeg").querySelectorAll("button").forEach(b => b.onclick = () => {
-    if (drag) cleanupDrag();
+function groupBlocks() {
+    const blocks = new Map();
 
-    if (marquee) {
-        if (marquee.el) marquee.el.remove();
-        marquee = null;
+    for (const d of DATA) {
+        if (!d.block || d.bay == null || d.tier == null) continue;
+
+        const block = d.block;
+        const bay = Number(d.bay);
+
+        if (!blocks.has(block)) blocks.set(block, new Map());
+
+        const b = blocks.get(block);
+
+        if (!b.has(bay)) b.set(bay, []);
+
+        b.get(bay).push(d);
     }
 
-    clearSelection();
+    return blocks;
+}
 
-    view = b.dataset.view;
+function renderStacks() {
+    const idx = groupBlocks();
+    const blockNames = [...idx.keys()].sort((a, b) => a.localeCompare(b, "ru"));
 
-    $("#viewSeg").querySelectorAll("button").forEach(x => {
-        x.classList.toggle("on", x === b);
-    });
+    yard.innerHTML =
+        `<div class="yard-stacks">` +
+        blockNames.map(name => renderOneBlock(name, idx)).join("") +
+        `</div>`;
 
-    render(true);
-});
+    updateStackHighlights();
+}
