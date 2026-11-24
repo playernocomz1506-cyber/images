@@ -1,109 +1,35 @@
-function buildFacets() {
-    const fill = (id, entries, hasDot) => {
-        const f = $(id);
-        if (!f) return;
+function animateNumber(el, to) {
+    if (!el) return;
 
-        f.querySelectorAll(".chip").forEach(c => c.remove());
+    to = Number(to) || 0;
 
-        entries.forEach(([val, name, count, color]) => {
-            f.insertAdjacentHTML(
-                "beforeend",
-                chipHTML(id.split("-")[1], val, name, count, color, hasDot)
-            );
-        });
-    };
+    const from = +(el.dataset.v || 0);
+    el.dataset.v = to;
 
-    // 1. Состояние
-    fill("#facet-state", [
-        [
-            "inuse",
-            STATES.inuse?.name || "Удовлетворительное",
-            DATA.filter(d => d.state === "inuse").length,
-            STATES.inuse?.hex || "#2f6b4f"
-        ],
-        [
-            "damaged",
-            STATES.damaged?.name || "Брак",
-            DATA.filter(d => d.state === "damaged").length,
-            STATES.damaged?.hex || "#9c3b22"
-        ]
-    ], true);
+    if (from === to) {
+        el.textContent = fmt(to);
+        return;
+    }
 
-    // 2. Статус операции
-    const procEntries = [
-        [
-            "__none",
-            "не в операции",
-            DATA.filter(d => !d.procState).length,
-            "#9aa7b4"
-        ]
-    ];
+    const t0 = performance.now();
+    const dur = 420;
 
-    Object.entries(PROC).forEach(([code, p]) => {
-        procEntries.push([
-            code,
-            p.name,
-            DATA.filter(d => d.procState === code).length,
-            p.hex
-        ]);
-    });
+    (function step(t) {
+        const k = Math.min(1, (t - t0) / dur);
+        const e = 1 - Math.pow(1 - k, 3);
 
-    fill("#facet-proc", procEntries, true);
+        el.textContent = fmt(Math.round(from + (to - from) * e));
 
-    // 3. Тип контейнера — полный справочник + реальные типы из DATA
-    const typeCounts = new Map();
+        if (k < 1) requestAnimationFrame(step);
+    })(t0);
+}
 
-    // Сначала все типы из справочника с 0
-    (window.CONTAINER_TYPES || []).forEach(t => {
-        if (!t.caption || isJunkType(t.caption)) return;
-        typeCounts.set(t.caption, 0);
-    });
+function updateTopCounters() {
+    animateNumber($("#cnt-inuse"), DATA.filter(d => d.state === "inuse").length);
+    animateNumber($("#cnt-alert"), DATA.filter(d => isProblem(d)).length);
 
-    // Потом считаем реальные контейнеры
-    DATA.forEach(d => {
-        const cap = d.typeLegacy || "—";
-        if (isJunkType(cap)) return;
-        typeCounts.set(cap, (typeCounts.get(cap) || 0) + 1);
-    });
-
-    const typeEntries = Array.from(typeCounts.entries())
-        .sort((a, b) => a[0].localeCompare(b[0], "ru"))
-        .map(([cap, count]) => [cap, cap, count, null]);
-
-    fill("#facet-type", typeEntries, false);
-
-    // 4. Собственность
-    fill("#facet-own", [
-        [
-            "kgmk",
-            "Собственность КГМК",
-            DATA.filter(d => d.kgmk).length,
-            "var(--accent)"
-        ],
-        [
-            "other",
-            "Прочие / аренда",
-            DATA.filter(d => !d.kgmk).length,
-            "#8593a1"
-        ]
-    ], false);
-
-    document.querySelectorAll(".chip").forEach(c => {
-        const set = filters[c.dataset.facet];
-        if (!set) return;
-
-        if (set.has(c.dataset.val)) {
-            c.classList.add("active");
-        }
-
-        c.onclick = () => {
-            if (set.has(c.dataset.val)) set.delete(c.dataset.val);
-            else set.add(c.dataset.val);
-
-            c.classList.toggle("active");
-
-            // Теперь всё локально, потому что DATA полный
-            applyChange(true);
-        };
-    });
+    animateNumber($("#cnt-a"), DATA.filter(d => d.procState === "arrival").length);
+    animateNumber($("#cnt-w"), DATA.filter(d => d.procState === "weighing").length);
+    animateNumber($("#cnt-s"), DATA.filter(d => d.procState === "storage").length);
+    animateNumber($("#cnt-h"), DATA.filter(d => d.procState === "shipment").length);
 }
