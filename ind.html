@@ -1,0 +1,129 @@
+function buildFacets() {
+    const getCount = (key, localFilterFn) => {
+        if (GLOBAL_STATS[key] !== undefined) return Number(GLOBAL_STATS[key]);
+        return DATA.filter(localFilterFn).length;
+    };
+
+    const fill = (id, entries, hasDot) => {
+        const f = $(id);
+        f.querySelectorAll(".chip").forEach(c => c.remove());
+
+        entries.forEach(([val, name, count, color]) => {
+            f.insertAdjacentHTML(
+                "beforeend",
+                chipHTML(id.split("-")[1], val, name, count, color, hasDot)
+            );
+        });
+    };
+
+    // 1. Состояние
+    fill("#facet-state", [
+        [
+            "inuse",
+            STATES.inuse?.name || "Удовлетворительное",
+            getCount("state_inuse", d => d.state === "inuse"),
+            STATES.inuse?.hex || "#2f6b4f"
+        ],
+        [
+            "damaged",
+            STATES.damaged?.name || "Брак",
+            getCount("state_damaged", d => d.state === "damaged"),
+            STATES.damaged?.hex || "#9c3b22"
+        ],
+    ], true);
+
+    // 2. Статус операции
+    const procEntries = [
+        [
+            "__none",
+            "не в операции",
+            getCount("proc_none", d => !d.procState),
+            "#9aa7b4"
+        ]
+    ];
+
+    Object.entries(PROC).forEach(([code, p]) => {
+        procEntries.push([
+            code,
+            p.name,
+            getCount(`proc_${code}`, d => d.procState === code),
+            p.hex
+        ]);
+    });
+
+    fill("#facet-proc", procEntries, true);
+
+    // 3. Тип контейнера — полный список
+    const localTypes = new Map(typeCaptions());
+    const statsTypes = new Map();
+
+    let hasTypeStats = false;
+
+    Object.entries(GLOBAL_STATS).forEach(([key, value]) => {
+        if (!key.startsWith("type_")) return;
+
+        hasTypeStats = true;
+
+        let cap = key.slice("type_".length);
+
+        if (cap === "null" || cap === "") {
+            cap = "—";
+        }
+
+        statsTypes.set(cap, Number(value || 0));
+    });
+
+    const allTypeCaptions = new Set();
+
+    // Типы из статистики
+    statsTypes.forEach((_, cap) => allTypeCaptions.add(cap));
+
+    // Типы из полного справочника
+    (window.ALL_CONTAINER_TYPES || window.CONTAINER_TYPES || []).forEach(t => {
+        if (t.caption) allTypeCaptions.add(t.caption);
+    });
+
+    // Типы из текущей страницы как fallback
+    localTypes.forEach((_, cap) => allTypeCaptions.add(cap));
+
+    const typeEntries = Array.from(allTypeCaptions)
+        .sort((a, b) => a.localeCompare(b, "ru"))
+        .map(cap => {
+            const count = hasTypeStats
+                ? (statsTypes.get(cap) || 0)
+                : (localTypes.get(cap) || 0);
+
+            return [cap, cap, count, null];
+        });
+
+    fill("#facet-type", typeEntries, false);
+
+    // 4. Собственность
+    const kgmkCount = getCount("own_kgmk", d => d.kgmk);
+
+    const otherCount = GLOBAL_STATS["own_other"] !== undefined
+        ? Number(GLOBAL_STATS["own_other"])
+        : (getCount("total", () => true) - kgmkCount);
+
+    fill("#facet-own", [
+        ["kgmk", "Собственность КГМК", kgmkCount, "var(--accent)"],
+        ["other", "Прочие / аренда", otherCount, "#8593a1"]
+    ], false);
+
+    // Обработчики кликов
+    document.querySelectorAll(".chip").forEach(c => {
+        const set = filters[c.dataset.facet];
+
+        if (set && set.has(c.dataset.val)) {
+            c.classList.add("active");
+        }
+
+        c.onclick = () => {
+            if (set.has(c.dataset.val)) set.delete(c.dataset.val);
+            else set.add(c.dataset.val);
+
+            c.classList.toggle("active");
+            applyChange(true);
+        };
+    });
+}
